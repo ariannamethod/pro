@@ -1,14 +1,27 @@
 import os
+import sqlite3
 from collections import Counter, defaultdict
-from typing import Dict, List
+from typing import Dict, List, Optional
 import math
 import difflib
 import numpy as np
 
 from pro_metrics import tokenize, lowercase
+from pro_memory import DB_PATH
 
 _GRAPH: Dict[str, Counter] = {}
 _VECTORS: Dict[str, Dict[str, float]] = {}
+_SYNONYMS: Dict[str, str] = {}
+
+if os.path.exists(DB_PATH):
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cur = conn.cursor()
+        cur.execute("SELECT word, analog FROM synonyms")
+        _SYNONYMS = {w: a for w, a in cur.fetchall() if w and a}
+        conn.close()
+    except sqlite3.Error:
+        _SYNONYMS = {}
 
 
 def _build_graph(dataset_dir: str = "datasets") -> Dict[str, Counter]:
@@ -96,6 +109,26 @@ def suggest(word: str, topn: int = 3) -> List[str]:
         return [w for w, _ in ordered[:topn]]
     vocab = list(_VECTORS.keys())
     return difflib.get_close_matches(word, vocab, n=topn)
+
+
+def lookup_analogs(word: str) -> Optional[str]:
+    """Return a known analog for *word* or a suggestion.
+
+    The function first checks an in-memory cache populated from the
+    ``synonyms`` table in ``pro_memory.db`` at import time. If no entry is
+    found, it falls back to :func:`suggest` and returns the best match if
+    available.
+    """
+
+    analog = _SYNONYMS.get(word)
+    if analog:
+        return analog
+    suggestions = suggest(word, topn=1)
+    if suggestions:
+        cand = suggestions[0]
+        if difflib.SequenceMatcher(None, word, cand).ratio() >= 0.95:
+            return cand
+    return None
 
 
 class MiniSelfAttention:

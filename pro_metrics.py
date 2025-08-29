@@ -121,3 +121,12 @@ def compute_metrics(
             words, char_ngram_counts, char_n
         ),
     }
+
+
+def target_length_from_metrics(
+    metrics: Dict[str, float], min_len: int = 6, max_len: int = 10
+) -> int:
+    """Map aggregated metric values to a length in ``[min_len, max_len]``."""
+    span = max_len - min_len + 1
+    total = sum(metrics.values())
+    return min_len + int(total) % span

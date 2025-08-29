@@ -85,7 +85,11 @@ class ProEngine:
             return "Silence echoes within void."
         if len(charged) < 5:
             charged = (charged * 5)[:5]
-        sentence = charged[0].capitalize() + ' ' + ' '.join(charged[1:]) + '.'
+        first = charged[0]
+        if first and first[0].isalpha():
+            first = first[0].upper() + first[1:]
+        words = [first] + charged[1:]
+        sentence = " ".join(filter(None, words)) + "."
         return sentence
 
     async def process_message(self, message: str) -> Tuple[str, Dict]:

@@ -2,6 +2,8 @@ import os
 import sys
 import asyncio
 
+import pytest
+
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 
 import pro_memory  # noqa: E402
@@ -10,7 +12,8 @@ import pro_sequence  # noqa: E402
 from pro_engine import ProEngine  # noqa: E402
 
 
-def test_preserves_uppercase_mid_sentence(monkeypatch):
+@pytest.fixture
+def engine(monkeypatch):
     engine = ProEngine()
 
     async def dummy_add_message(*args, **kwargs):
@@ -31,5 +34,19 @@ def test_preserves_uppercase_mid_sentence(monkeypatch):
 
     monkeypatch.setattr(pro_sequence, "analyze_sequences", noop)
 
+    return engine
+
+
+def test_preserves_uppercase_mid_sentence(engine):
     response, _ = asyncio.run(engine.process_message("hello WORLD friend"))
     assert "WORLD" in response.split()[1:]
+
+
+def test_acronym_first_word(engine):
+    response, _ = asyncio.run(engine.process_message("NASA launches rockets"))
+    assert response.split()[0] == "NASA"
+
+
+def test_mixed_case_first_word(engine):
+    response, _ = asyncio.run(engine.process_message("iPhone release soon"))
+    assert response.split()[0] == "IPhone"

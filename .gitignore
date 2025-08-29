@@ -205,3 +205,8 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# PRO engine state and logs
+pro_state.json
+dataset_sha.json
+pro.log

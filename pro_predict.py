@@ -3,6 +3,7 @@ from collections import Counter, defaultdict
 from typing import Dict, List
 import math
 import difflib
+import numpy as np
 
 from pro_metrics import tokenize, lowercase
 
@@ -95,3 +96,46 @@ def suggest(word: str, topn: int = 3) -> List[str]:
         return [w for w, _ in ordered[:topn]]
     vocab = list(_VECTORS.keys())
     return difflib.get_close_matches(word, vocab, n=topn)
+
+
+class MiniSelfAttention:
+    """A tiny self-attention module for next-word prediction."""
+
+    def __init__(self, vocab: List[str], dim: int = 32) -> None:
+        self.vocab = vocab
+        self.dim = dim
+        rng = np.random.default_rng(0)
+        self.emb = rng.standard_normal((len(vocab), dim))
+        self.w_q = rng.standard_normal((dim, dim))
+        self.w_k = rng.standard_normal((dim, dim))
+        self.w_v = rng.standard_normal((dim, dim))
+        self.w_o = rng.standard_normal((dim, len(vocab)))
+
+    def logits(self, tokens: List[str]) -> Dict[str, float]:
+        ids = [self.vocab.index(t) for t in tokens if t in self.vocab]
+        if not ids:
+            return {w: 0.0 for w in self.vocab}
+        x = self.emb[ids]
+        q = x @ self.w_q
+        k = x @ self.w_k
+        v = x @ self.w_v
+        scale = np.sqrt(self.dim)
+        att = q @ k.T / scale
+        att = np.exp(att - att.max(axis=-1, keepdims=True))
+        att = att / att.sum(axis=-1, keepdims=True)
+        context = att @ v
+        pooled = context.mean(axis=0)
+        out = pooled @ self.w_o
+        return {self.vocab[i]: float(out[i]) for i in range(len(self.vocab))}
+
+
+_TRANSFORMERS: Dict[tuple, MiniSelfAttention] = {}
+
+
+def transformer_logits(tokens: List[str], vocab: List[str]) -> Dict[str, float]:
+    """Return next-word logits for *tokens* using a tiny transformer."""
+    key = tuple(vocab)
+    if key not in _TRANSFORMERS:
+        _TRANSFORMERS[key] = MiniSelfAttention(vocab)
+    model = _TRANSFORMERS[key]
+    return model.logits(tokens)

@@ -4,7 +4,7 @@ import os
 import hashlib
 import asyncio
 import math
-from typing import Dict, List, Tuple
+from typing import Dict, List, Tuple, Set, Optional
 from collections import Counter
 
 from pro_metrics import (
@@ -158,6 +158,73 @@ class ProEngine:
             return max(wc, key=wc.get)
         return ""
 
+    def plan_sentence(
+        self,
+        initial: List[str],
+        target_length: int,
+        beam_width: int = 3,
+        forbidden: Optional[Set[str]] = None,
+    ) -> List[str]:
+        """Plan a sentence using beam search.
+
+        Candidates are scored by combining entropy and trigram perplexity.
+        Paths that would repeat words (case-insensitive) are discarded.
+        """
+        trigram_counts = self.state.get("trigram_counts", {})
+        bigram_counts = self.state.get("bigram_counts", {})
+        word_counts = self.state.get("word_counts", {})
+        char_counts = self.state.get("char_ngram_counts", {})
+
+        base_used: Set[str] = set(w.lower() for w in forbidden or [])
+        start_seq: List[str] = []
+        for w in initial:
+            lw = w.lower()
+            if w and lw not in base_used:
+                start_seq.append(w)
+                base_used.add(lw)
+
+        global_order = sorted(word_counts, key=word_counts.get, reverse=True)
+        beams = [(start_seq, base_used)]
+        while beams and len(beams[0][0]) < target_length:
+            new_beams = []
+            for seq, used in beams:
+                if len(seq) >= 2:
+                    prev2, prev1 = seq[-2], seq[-1]
+                elif len(seq) == 1:
+                    prev2, prev1 = "<s>", seq[-1]
+                else:
+                    prev2, prev1 = "<s>", "<s>"
+                tcands = trigram_counts.get((prev2, prev1), {})
+                ordered = sorted(tcands, key=tcands.get, reverse=True)
+                if ordered:
+                    fallback = [w for w in global_order if w not in ordered]
+                    ordered.extend(fallback)
+                else:
+                    ordered = [w for w in global_order if w.lower() not in used]
+                if not ordered:
+                    ordered = [f"alt{len(used)+i}" for i in range(beam_width * 2)]
+                for cand in ordered[: beam_width * 2]:
+                    lw = cand.lower()
+                    if lw in used:
+                        continue
+                    new_seq = seq + [cand]
+                    new_used = used | {lw}
+                    metrics = compute_metrics(
+                        [w.lower() for w in new_seq],
+                        trigram_counts,
+                        bigram_counts,
+                        word_counts,
+                        char_counts,
+                    )
+                    score = metrics["entropy"] - metrics["trigram_perplexity"]
+                    new_beams.append((score, new_seq, new_used))
+            if not new_beams:
+                break
+            new_beams.sort(key=lambda x: x[0], reverse=True)
+            beams = [(seq, used) for _, seq, used in new_beams[:beam_width]]
+        best_seq = beams[0][0] if beams else start_seq
+        return best_seq[:target_length]
+
     def respond(self, seeds: List[str]) -> str:
         if not seeds:
             return "Silence echoes within void."
@@ -207,22 +274,14 @@ class ProEngine:
                 self.state.get("char_ngram_counts", {}),
             )
             target_length = target_length_from_metrics(metrics)
-            while len(words) < target_length:
-                prev2, prev1 = words[-2], words[-1]
-                nxt = self.predict_next_word(prev2, prev1)
-                if not nxt or nxt in used:
-                    nxt = next((w for w in ordered if w not in used), None)
-                    if nxt is None:
-                        nxt = f"alt{len(used)}"
-                words.append(nxt)
-                used.add(nxt)
+            words = self.plan_sentence(words, target_length)
             first = words[0]
             if first and first[0].isalpha():
                 first = first[0].upper() + first[1:]
             words[0] = first
             sentence1 = " ".join(filter(None, words[:target_length])) + "."
             first_words = lowercase(tokenize(sentence1))
-            used.update(first_words)
+            used = set(first_words)
 
             # ----- Second sentence: choose semantically distant seeds -----
             pro_predict._ensure_vectors()
@@ -254,23 +313,6 @@ class ProEngine:
             )
             second_seeds = ordered2[:2]
 
-            words2: List[str] = []
-            used2 = set(used)
-            for w in second_seeds:
-                if w and w not in used2:
-                    words2.append(w)
-                    used2.add(w)
-            for w in ordered:
-                if len(words2) >= 2:
-                    break
-                if w and w not in used2:
-                    words2.append(w)
-                    used2.add(w)
-            while len(words2) < 2:
-                fallback = f"alt{len(used2)}"
-                words2.append(fallback)
-                used2.add(fallback)
-
             metrics_first = compute_metrics(
                 first_words,
                 self.state.get("trigram_counts", {}),
@@ -286,15 +328,11 @@ class ProEngine:
                 min_len=5,
                 max_len=10,
             )
-            while len(words2) < target_length2:
-                prev2, prev1 = words2[-2], words2[-1]
-                nxt = self.predict_next_word(prev2, prev1)
-                if not nxt or nxt in used2:
-                    nxt = next((w for w in ordered if w not in used2), None)
-                    if nxt is None:
-                        nxt = f"alt{len(used2)}"
-                words2.append(nxt)
-                used2.add(nxt)
+            words2 = self.plan_sentence(
+                second_seeds + ordered,
+                target_length2,
+                forbidden=set(first_words),
+            )
             first2 = words2[0]
             if first2 and first2[0].isalpha():
                 first2 = first2[0].upper() + first2[1:]

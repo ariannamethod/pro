@@ -5,7 +5,7 @@ import pro_memory
 
 async def retrieve(query_words: List[str], limit: int = 5) -> List[str]:
     """Retrieve relevant messages from memory based on word overlap."""
-    messages = await pro_memory.fetch_recent(50)
+    messages, _ = await pro_memory.fetch_recent(50)
     qset = set(lowercase(query_words))
     scored = []
     for msg in messages:

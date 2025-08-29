@@ -3,6 +3,7 @@ from collections import Counter, defaultdict
 from typing import Dict, List
 import math
 import difflib
+import random
 
 from pro_metrics import tokenize, lowercase
 
@@ -76,3 +77,46 @@ def suggest(word: str, topn: int = 3) -> List[str]:
         return [w for w, _ in ordered[:topn]]
     vocab = list(_VECTORS.keys())
     return difflib.get_close_matches(word, vocab, n=topn)
+
+
+def dissimilar(words: List[str], count: int) -> List[str]:
+    """Return *count* words with low cosine similarity to *words*.
+
+    Words already present in *words* are excluded. When insufficient
+    candidates are available from the embedding vocabulary the remaining
+    slots are filled with random vocabulary terms.
+    """
+
+    _ensure_vectors()
+    vocab = set(_VECTORS.keys())
+    candidates = list(vocab - set(words))
+    if not candidates:
+        return []
+    scores: Dict[str, float] = {}
+    for cand in candidates:
+        vec = _VECTORS.get(cand)
+        if not vec:
+            scores[cand] = 0.0
+            continue
+        max_sim = 0.0
+        for w in words:
+            wvec = _VECTORS.get(w)
+            if not wvec:
+                continue
+            keys = set(vec) | set(wvec)
+            dot = sum(vec.get(k, 0.0) * wvec.get(k, 0.0) for k in keys)
+            norm_a = math.sqrt(sum(v * v for v in vec.values()))
+            norm_b = math.sqrt(sum(v * v for v in wvec.values()))
+            if norm_a == 0 or norm_b == 0:
+                continue
+            sim = dot / (norm_a * norm_b)
+            if sim > max_sim:
+                max_sim = sim
+        scores[cand] = max_sim
+    ordered = sorted(scores.items(), key=lambda x: x[1])
+    selected = [w for w, _ in ordered[:count]]
+    if len(selected) < count:
+        remaining = [w for w in candidates if w not in selected]
+        random.shuffle(remaining)
+        selected.extend(remaining[: count - len(selected)])
+    return selected

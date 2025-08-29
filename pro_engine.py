@@ -3,6 +3,7 @@ import logging
 import os
 import hashlib
 import asyncio
+import random
 from typing import Dict, List, Tuple
 from collections import Counter
 
@@ -203,10 +204,24 @@ class ProEngine:
             if first and first[0].isalpha():
                 first = first[0].upper() + first[1:]
             words[0] = first
-            sentence = " ".join(filter(None, words[:5])) + "."
-            if pro_memory.is_unique(sentence):
-                pro_memory.store_response(sentence)
-                return sentence
+            first_words = list(filter(None, words[:5]))
+            sentence = " ".join(first_words) + "."
+            second_len = random.choice([5, 6])
+            second_words = pro_predict.dissimilar(
+                [w.lower() for w in first_words], second_len
+            )
+            if second_words:
+                second_first = second_words[0]
+                if second_first and second_first[0].isalpha():
+                    second_first = second_first[0].upper() + second_first[1:]
+                second_words[0] = second_first
+                second_sentence = " ".join(second_words) + "."
+                response = sentence + " " + second_sentence
+            else:
+                response = sentence
+            if pro_memory.is_unique(response):
+                pro_memory.store_response(response)
+                return response
             if extra_idx < len(dataset_words):
                 attempt_seeds = list(seeds) + [dataset_words[extra_idx]]
             else:

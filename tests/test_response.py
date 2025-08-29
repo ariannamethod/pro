@@ -83,7 +83,7 @@ def test_response_uses_trigram_prediction(tmp_path, monkeypatch):
             "perplexity": metrics_first["perplexity"],
         },
         min_len=5,
-        max_len=10,
+        max_len=6,
     )
     assert len(second_words) == target2
     assert len(second_words) == len(set(second_words))
@@ -146,7 +146,7 @@ def test_preserves_first_word_capitalization(tmp_path, monkeypatch):
             "perplexity": metrics_first["perplexity"],
         },
         min_len=5,
-        max_len=10,
+        max_len=6,
     )
     assert len(second_words) == target2
     assert len(second_words) == len(set(second_words))
@@ -215,7 +215,7 @@ def test_duplicate_responses_suppressed(tmp_path, monkeypatch):
             "perplexity": metrics_first["perplexity"],
         },
         min_len=5,
-        max_len=10,
+        max_len=6,
     )
     target_f2_second = pro_metrics.target_length_from_metrics(
         {
@@ -223,7 +223,7 @@ def test_duplicate_responses_suppressed(tmp_path, monkeypatch):
             "perplexity": metrics_second["perplexity"],
         },
         min_len=5,
-        max_len=10,
+        max_len=6,
     )
     assert len(f1_second) == target_f1_second
     assert len(f2_second) == target_f2_second
@@ -292,7 +292,7 @@ def test_response_variable_length_output(tmp_path, monkeypatch):
             "perplexity": metrics_f1["perplexity"],
         },
         min_len=5,
-        max_len=10,
+        max_len=6,
     )
     target2b = pro_metrics.target_length_from_metrics(
         {
@@ -300,7 +300,7 @@ def test_response_variable_length_output(tmp_path, monkeypatch):
             "perplexity": metrics_f2["perplexity"],
         },
         min_len=5,
-        max_len=10,
+        max_len=6,
     )
     assert len(f1_second) == target1b
     assert len(f2_second) == target2b

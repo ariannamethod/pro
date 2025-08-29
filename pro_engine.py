@@ -41,7 +41,8 @@ class ProEngine:
             dataset_path = 'datasets/lines01.txt'
             if not os.path.exists(dataset_path):
                 logging.warning(
-                    "Dataset path %s does not exist; skipping initial training",
+                    "Dataset path %s does not exist; "
+                    "skipping initial training",
                     dataset_path,
                 )
             elif os.path.getsize(dataset_path) == 0:
@@ -51,9 +52,13 @@ class ProEngine:
                 )
             else:
                 try:
-                    await asyncio.to_thread(pro_tune.train, self.state, dataset_path)
+                    await asyncio.to_thread(
+                        pro_tune.train, self.state, dataset_path
+                    )
                     await self.save_state()
-                    logging.info("Initial training succeeded on %s", dataset_path)
+                    logging.info(
+                        "Initial training succeeded on %s", dataset_path
+                    )
                 except Exception as exc:
                     logging.error(
                         "Initial training failed: %s", exc
@@ -150,35 +155,63 @@ class ProEngine:
     def respond(self, seeds: List[str]) -> str:
         if not seeds:
             return "Silence echoes within void."
-        words = [w for w in seeds if w]
-        word_counts = self.state.get("word_counts", {})
-        ordered = sorted(word_counts, key=word_counts.get, reverse=True)
-        for w in ordered:
-            if len(words) >= 2:
-                break
-            if w and w not in words:
-                words.append(w)
-        while len(words) < 2:
-            words.append("")
-        while len(words) < 5:
-            prev2, prev1 = words[-2], words[-1]
-            nxt = self.predict_next_word(prev2, prev1)
-            if not nxt or nxt in words:
-                fallback = next(
-                    (w for w in ordered if w and w not in words),
-                    None,
-                )
-                if fallback is not None:
-                    nxt = fallback
-                else:
-                    nxt = words[(len(words)) % len(words)]
-            words.append(nxt)
-        first = words[0]
-        if first and first[0].isalpha():
-            first = first[0].upper() + first[1:]
-        words[0] = first
-        sentence = " ".join(filter(None, words[:5])) + "."
-        return sentence
+
+        dataset_words: List[str] = []
+        if os.path.exists("datasets"):
+            for name in os.listdir("datasets"):
+                path = os.path.join("datasets", name)
+                if not os.path.isfile(path):
+                    continue
+                try:
+                    with open(
+                        path, "r", encoding="utf-8", errors="ignore"
+                    ) as fh:
+                        for line in fh:
+                            dataset_words.extend(
+                                [w for w in line.strip().split() if w]
+                            )
+                except Exception:  # pragma: no cover - safety
+                    continue
+
+        attempt_seeds = list(seeds)
+        extra_idx = 0
+        while True:
+            words = [w for w in attempt_seeds if w]
+            word_counts = self.state.get("word_counts", {})
+            ordered = sorted(word_counts, key=word_counts.get, reverse=True)
+            for w in ordered:
+                if len(words) >= 2:
+                    break
+                if w and w not in words:
+                    words.append(w)
+            while len(words) < 2:
+                words.append("")
+            while len(words) < 5:
+                prev2, prev1 = words[-2], words[-1]
+                nxt = self.predict_next_word(prev2, prev1)
+                if not nxt or nxt in words:
+                    fallback = next(
+                        (w for w in ordered if w and w not in words),
+                        None,
+                    )
+                    if fallback is not None:
+                        nxt = fallback
+                    else:
+                        nxt = words[(len(words)) % len(words)]
+                words.append(nxt)
+            first = words[0]
+            if first and first[0].isalpha():
+                first = first[0].upper() + first[1:]
+            words[0] = first
+            sentence = " ".join(filter(None, words[:5])) + "."
+            if pro_memory.is_unique(sentence):
+                pro_memory.store_response(sentence)
+                return sentence
+            if extra_idx < len(dataset_words):
+                attempt_seeds = list(seeds) + [dataset_words[extra_idx]]
+            else:
+                attempt_seeds = list(seeds) + [f"alt{extra_idx}"]
+            extra_idx += 1
 
     async def process_message(self, message: str) -> Tuple[str, Dict]:
         original_words = tokenize(message)

@@ -70,5 +70,5 @@ def test_sqlite_connection_open_close(engine, monkeypatch):
     monkeypatch.setattr(sqlite3, "connect", tracking_connect)
 
     asyncio.run(engine.process_message("another message"))
-    assert counts["connect"] == 3
-    assert counts["close"] == 3
+    assert counts["connect"] == 5
+    assert counts["close"] == 5

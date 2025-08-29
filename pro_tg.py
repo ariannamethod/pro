@@ -5,11 +5,16 @@ import json
 import os
 from urllib import parse, request
 
+from pro_engine import ProEngine
+
 TOKEN = os.environ.get("TELEGRAM_TOKEN")
 if not TOKEN:
     raise RuntimeError("TELEGRAM_TOKEN environment variable not set")
 
 API_URL = f"https://api.telegram.org/bot{TOKEN}"
+
+
+engine = ProEngine()
 
 
 def _sync_request(req: request.Request) -> dict:
@@ -39,6 +44,7 @@ async def send_message(chat_id: int, text: str) -> None:
 
 
 async def main() -> None:
+    await engine.setup()
     offset = None
     while True:
         try:
@@ -50,7 +56,8 @@ async def main() -> None:
                 chat = message.get("chat") or {}
                 chat_id = chat.get("id")
                 if chat_id and text:
-                    await send_message(chat_id, text)
+                    response, _ = await engine.process_message(text)
+                    await send_message(chat_id, response)
         except Exception as exc:  # pragma: no cover - logging only
             print(f"Error: {exc}")
             await asyncio.sleep(1)

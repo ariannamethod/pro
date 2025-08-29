@@ -7,6 +7,7 @@ import math
 import random
 from typing import Dict, List, Tuple, Set, Optional
 from collections import Counter
+import re
 
 from pro_metrics import (
     tokenize,
@@ -280,7 +281,10 @@ class ProEngine:
         vocab = vocab or {}
         cf = self.chaos_factor if chaos_factor is None else chaos_factor
         ordered_vocab = [
-            w for w, _ in sorted(vocab.items(), key=lambda x: x[1], reverse=True)
+            w
+            for w, _ in sorted(
+                vocab.items(), key=lambda x: x[1], reverse=True
+            )
         ]
 
         attempt_seeds = list(seeds)
@@ -297,7 +301,9 @@ class ProEngine:
             combined_counts: Dict[str, float] = dict(word_counts)
             for w, weight in vocab.items():
                 combined_counts[w] = combined_counts.get(w, 0) + weight
-            ordered = sorted(combined_counts, key=combined_counts.get, reverse=True)
+            ordered = sorted(
+                combined_counts, key=combined_counts.get, reverse=True
+            )
             for w in ordered:
                 if len(words) >= 2:
                     break
@@ -346,10 +352,19 @@ class ProEngine:
                 else:
                     sim = 0.0
                 scores[word] = sim
+            skip_re = re.compile(r"^[Vv]\d+$")
             ordered2 = (
-                [w for w, _ in sorted(scores.items(), key=lambda x: x[1])]
+                [
+                    w
+                    for w, _ in sorted(scores.items(), key=lambda x: x[1])
+                    if not skip_re.match(w)
+                ]
                 if scores
-                else [w for w in ordered if w not in tracker]
+                else [
+                    w
+                    for w in ordered
+                    if w not in tracker and not skip_re.match(w)
+                ]
             )
             second_seeds = ordered2[:2]
 

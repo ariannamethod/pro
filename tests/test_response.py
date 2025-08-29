@@ -1,6 +1,7 @@
 import asyncio
 import math
 import os
+import re
 import sqlite3
 
 import pro_engine
@@ -315,3 +316,37 @@ def test_response_variable_length_output(tmp_path, monkeypatch):
         set(w.lower() for w in f2_second)
     )
     assert target1 != target2
+
+
+def test_skips_version_tokens_in_second_sentence(tmp_path, monkeypatch):
+    db_path = tmp_path / "mem.db"
+    monkeypatch.setattr(pro_memory, "DB_PATH", str(db_path))
+    asyncio.run(pro_memory.init_db())
+    engine = pro_engine.ProEngine()
+    engine.state["trigram_counts"] = {
+        ("hello", "world"): {"foo": 1},
+        ("world", "foo"): {"bar": 1},
+        ("foo", "bar"): {"baz": 1},
+    }
+    engine.state["word_counts"] = {
+        "hello": 5,
+        "world": 4,
+        "foo": 3,
+        "bar": 2,
+        "baz": 1,
+    }
+    monkeypatch.setattr(
+        pro_predict,
+        "_VECTORS",
+        {"V1": {"x": 1.0}, "V2": {"x": 0.9}},
+    )
+    real_exists = os.path.exists
+    monkeypatch.setattr(
+        os.path,
+        "exists",
+        lambda p, _real=real_exists: False if p == "datasets" else _real(p),
+    )
+    sentence = engine.respond(["hello", "world"])
+    _, second_words = _split_two_sentences(sentence)
+    pattern = re.compile(r"^[Vv]\d+$")
+    assert second_words and not any(pattern.match(w) for w in second_words)

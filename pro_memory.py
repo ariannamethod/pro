@@ -1,6 +1,6 @@
 import sqlite3
 import asyncio
-from typing import List
+from typing import List, Tuple
 
 DB_PATH = 'pro_memory.db'
 
@@ -58,16 +58,25 @@ def store_response(sentence: str) -> None:
     conn.close()
 
 
-async def fetch_recent(limit: int = 5) -> List[str]:
-    """Fetch recent messages for context."""
-    def _read() -> List[str]:
+async def fetch_recent(limit: int = 5) -> Tuple[List[str], List[str]]:
+    """Fetch recent messages and responses for context."""
+
+    def _read() -> Tuple[List[str], List[str]]:
         conn = sqlite3.connect(DB_PATH)
         cur = conn.cursor()
         cur.execute(
             'SELECT content FROM messages ORDER BY id DESC LIMIT ?',
             (limit,),
         )
-        rows = cur.fetchall()
+        msg_rows = cur.fetchall()
+        cur.execute(
+            'SELECT content FROM responses ORDER BY id DESC LIMIT ?',
+            (limit,),
+        )
+        resp_rows = cur.fetchall()
         conn.close()
-        return [r[0] for r in rows][::-1]
+        messages = [r[0] for r in msg_rows][::-1]
+        responses = [r[0] for r in resp_rows][::-1]
+        return messages, responses
+
     return await asyncio.to_thread(_read)

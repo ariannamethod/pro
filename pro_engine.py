@@ -233,45 +233,38 @@ class ProEngine:
         best_seq = beams[0][0] if beams else start_seq
         return best_seq[:target_length]
 
-    def respond(self, seeds: List[str]) -> str:
+    def respond(
+        self, seeds: List[str], vocab: Optional[Dict[str, int]] = None
+    ) -> str:
         if not seeds:
             return "Silence echoes within void."
 
-        dataset_words: List[str] = []
-        if os.path.exists("datasets"):
-            for name in os.listdir("datasets"):
-                path = os.path.join("datasets", name)
-                if not os.path.isfile(path):
-                    continue
-                try:
-                    with open(
-                        path, "r", encoding="utf-8", errors="ignore"
-                    ) as fh:
-                        for line in fh:
-                            dataset_words.extend(
-                                [w for w in line.strip().split() if w]
-                            )
-                except Exception:  # pragma: no cover - safety
-                    continue
+        vocab = vocab or {}
+        ordered_vocab = [
+            w for w, _ in sorted(vocab.items(), key=lambda x: x[1], reverse=True)
+        ]
 
         attempt_seeds = list(seeds)
         extra_idx = 0
         while True:
             # ----- First sentence -----
             words: List[str] = []
-            used = set()
+            tracker: Set[str] = set()
             for w in attempt_seeds:
-                if w and w not in used:
+                if w and w not in tracker:
                     words.append(w)
-                    used.add(w)
+                    tracker.add(w)
             word_counts = self.state.get("word_counts", {})
-            ordered = sorted(word_counts, key=word_counts.get, reverse=True)
+            combined_counts: Dict[str, float] = dict(word_counts)
+            for w, weight in vocab.items():
+                combined_counts[w] = combined_counts.get(w, 0) + weight
+            ordered = sorted(combined_counts, key=combined_counts.get, reverse=True)
             for w in ordered:
                 if len(words) >= 2:
                     break
-                if w and w not in used:
+                if w and w not in tracker:
                     words.append(w)
-                    used.add(w)
+                    tracker.add(w)
             while len(words) < 2:
                 words.append("")
             metrics = compute_metrics(
@@ -289,7 +282,7 @@ class ProEngine:
             words[0] = first
             sentence1 = " ".join(filter(None, words[:target_length])) + "."
             first_words = lowercase(tokenize(sentence1))
-            used = set(first_words)
+            tracker = set(first_words)
 
             # ----- Second sentence: choose semantically distant seeds -----
             pro_predict._ensure_vectors()
@@ -307,7 +300,7 @@ class ProEngine:
             first_vecs = [vectors[w] for w in first_words if w in vectors]
             scores: Dict[str, float] = {}
             for word, vec in vectors.items():
-                if word in used:
+                if word in tracker:
                     continue
                 if first_vecs:
                     sim = max(_cos(vec, fv) for fv in first_vecs)
@@ -317,7 +310,7 @@ class ProEngine:
             ordered2 = (
                 [w for w, _ in sorted(scores.items(), key=lambda x: x[1])]
                 if scores
-                else [w for w in ordered if w not in used]
+                else [w for w in ordered if w not in tracker]
             )
             second_seeds = ordered2[:2]
 
@@ -351,8 +344,8 @@ class ProEngine:
             if pro_memory.is_unique(response):
                 pro_memory.store_response(response)
                 return response
-            if extra_idx < len(dataset_words):
-                attempt_seeds = list(seeds) + [dataset_words[extra_idx]]
+            if extra_idx < len(ordered_vocab):
+                attempt_seeds = list(seeds) + [ordered_vocab[extra_idx]]
             else:
                 attempt_seeds = list(seeds) + [f"alt{extra_idx}"]
             extra_idx += 1
@@ -402,7 +395,33 @@ class ProEngine:
             self.state['char_ngram_counts'],
         )
         seed_words = original_words + context_tokens + predicted
-        response = self.respond(seed_words)
+        recent_msgs, recent_resps = await pro_memory.fetch_recent(50)
+        mem_tokens: List[str] = []
+        for text in recent_msgs + recent_resps:
+            mem_tokens.extend(lowercase(tokenize(text)))
+        data_tokens: List[str] = []
+        if os.path.exists("datasets"):
+            for name in os.listdir("datasets"):
+                path = os.path.join("datasets", name)
+                if not os.path.isfile(path):
+                    continue
+                try:
+                    with open(
+                        path, "r", encoding="utf-8", errors="ignore"
+                    ) as fh:
+                        for line in fh:
+                            data_tokens.extend(lowercase(tokenize(line)))
+                except Exception:  # pragma: no cover - safety
+                    continue
+        mem_counts = Counter(mem_tokens)
+        data_counts = Counter(data_tokens)
+        combined_vocab: Dict[str, int] = {}
+        for w in set(mem_counts) | set(data_counts):
+            weight = mem_counts.get(w, 0) + data_counts.get(w, 0)
+            if w in mem_counts and w in data_counts:
+                weight *= 2
+            combined_vocab[w] = weight
+        response = self.respond(seed_words, combined_vocab)
         try:
             await pro_memory.add_message(response)
         except Exception as exc:  # pragma: no cover - logging side effect

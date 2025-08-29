@@ -1,0 +1,2 @@
+# This file ensures Nixpacks detects the app as Python.
+# Add runtime dependencies here when needed.

@@ -1,3 +1,4 @@
+import os
 import asyncio
 import pro_engine
 import pro_memory
@@ -6,6 +7,9 @@ import pro_tune
 
 
 def test_process_message_resilience(monkeypatch):
+    for path in [pro_memory.DB_PATH, "pro_state.json", "dataset_sha.json"]:
+        if os.path.exists(path):
+            os.remove(path)
     engine = pro_engine.ProEngine()
     asyncio.run(engine.setup())
 

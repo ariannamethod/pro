@@ -3,6 +3,7 @@ import logging
 import os
 import hashlib
 import asyncio
+import math
 from typing import Dict, List, Tuple
 from collections import Counter
 
@@ -181,6 +182,7 @@ class ProEngine:
         attempt_seeds = list(seeds)
         extra_idx = 0
         while True:
+            # ----- First sentence -----
             words: List[str] = []
             used = set()
             for w in attempt_seeds:
@@ -218,10 +220,91 @@ class ProEngine:
             if first and first[0].isalpha():
                 first = first[0].upper() + first[1:]
             words[0] = first
-            sentence = " ".join(filter(None, words[:target_length])) + "."
-            if pro_memory.is_unique(sentence):
-                pro_memory.store_response(sentence)
-                return sentence
+            sentence1 = " ".join(filter(None, words[:target_length])) + "."
+            first_words = lowercase(tokenize(sentence1))
+            used.update(first_words)
+
+            # ----- Second sentence: choose semantically distant seeds -----
+            pro_predict._ensure_vectors()
+            vectors = pro_predict._VECTORS
+
+            def _cos(a: Dict[str, float], b: Dict[str, float]) -> float:
+                keys = set(a) | set(b)
+                dot = sum(a.get(k, 0.0) * b.get(k, 0.0) for k in keys)
+                na = math.sqrt(sum(v * v for v in a.values()))
+                nb = math.sqrt(sum(v * v for v in b.values()))
+                if na == 0 or nb == 0:
+                    return 0.0
+                return dot / (na * nb)
+
+            first_vecs = [vectors[w] for w in first_words if w in vectors]
+            scores: Dict[str, float] = {}
+            for word, vec in vectors.items():
+                if word in used:
+                    continue
+                if first_vecs:
+                    sim = max(_cos(vec, fv) for fv in first_vecs)
+                else:
+                    sim = 0.0
+                scores[word] = sim
+            ordered2 = (
+                [w for w, _ in sorted(scores.items(), key=lambda x: x[1])]
+                if scores
+                else [w for w in ordered if w not in used]
+            )
+            second_seeds = ordered2[:2]
+
+            words2: List[str] = []
+            used2 = set(used)
+            for w in second_seeds:
+                if w and w not in used2:
+                    words2.append(w)
+                    used2.add(w)
+            for w in ordered:
+                if len(words2) >= 2:
+                    break
+                if w and w not in used2:
+                    words2.append(w)
+                    used2.add(w)
+            while len(words2) < 2:
+                fallback = f"alt{len(used2)}"
+                words2.append(fallback)
+                used2.add(fallback)
+
+            metrics_first = compute_metrics(
+                first_words,
+                self.state.get("trigram_counts", {}),
+                self.state.get("bigram_counts", {}),
+                self.state.get("word_counts", {}),
+                self.state.get("char_ngram_counts", {}),
+            )
+            target_length2 = target_length_from_metrics(
+                {
+                    "entropy": metrics_first["entropy"],
+                    "perplexity": metrics_first["perplexity"],
+                },
+                min_len=5,
+                max_len=10,
+            )
+            while len(words2) < target_length2:
+                prev2, prev1 = words2[-2], words2[-1]
+                nxt = self.predict_next_word(prev2, prev1)
+                if not nxt or nxt in used2:
+                    nxt = next((w for w in ordered if w not in used2), None)
+                    if nxt is None:
+                        nxt = f"alt{len(used2)}"
+                words2.append(nxt)
+                used2.add(nxt)
+            first2 = words2[0]
+            if first2 and first2[0].isalpha():
+                first2 = first2[0].upper() + first2[1:]
+            words2[0] = first2
+            sentence2 = " ".join(filter(None, words2[:target_length2])) + "."
+
+            response = sentence1 + " " + sentence2
+            if pro_memory.is_unique(response):
+                pro_memory.store_response(response)
+                return response
             if extra_idx < len(dataset_words):
                 attempt_seeds = list(seeds) + [dataset_words[extra_idx]]
             else:

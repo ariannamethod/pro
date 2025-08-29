@@ -79,8 +79,14 @@ class ProEngine:
     async def _async_tune(self) -> None:
         for name in os.listdir('datasets'):
             path = os.path.join('datasets', name)
-            await asyncio.to_thread(pro_tune.train, self.state, path)
-        await self.save_state()
+            try:
+                await asyncio.to_thread(pro_tune.train, self.state, path)
+            except Exception as exc:  # pragma: no cover - logging side effect
+                logging.error("Tuning failed for %s: %s", path, exc)
+        try:
+            await self.save_state()
+        except Exception as exc:  # pragma: no cover - logging side effect
+            logging.error("Saving state failed after tuning: %s", exc)
 
     def compute_charged_words(self, words: List[str]) -> List[str]:
         word_counts = Counter(words)
@@ -106,8 +112,15 @@ class ProEngine:
     async def process_message(self, message: str) -> Tuple[str, Dict]:
         original_words = tokenize(message)
         words = lowercase(original_words)
-        await pro_memory.add_message(message)
-        context = await pro_rag.retrieve(words)
+        try:
+            await pro_memory.add_message(message)
+        except Exception as exc:  # pragma: no cover - logging side effect
+            logging.error("Storing message failed: %s", exc)
+        context: List[str] = []
+        try:
+            context = await pro_rag.retrieve(words)
+        except Exception as exc:  # pragma: no cover - logging side effect
+            logging.error("Context retrieval failed: %s", exc)
         context_tokens = tokenize(' '.join(context))
         all_words = words + lowercase(context_tokens)
         metrics = compute_metrics(
@@ -119,7 +132,10 @@ class ProEngine:
         )
         charged = self.compute_charged_words(original_words + context_tokens)
         response = self.respond(charged)
-        await pro_memory.add_message(response)
+        try:
+            await pro_memory.add_message(response)
+        except Exception as exc:  # pragma: no cover - logging side effect
+            logging.error("Storing response failed: %s", exc)
         await asyncio.to_thread(
             pro_sequence.analyze_sequences, self.state, words
         )
@@ -128,7 +144,10 @@ class ProEngine:
             self.state,
             lowercase(tokenize(response)),
         )
-        await self.save_state()
+        try:
+            await self.save_state()
+        except Exception as exc:  # pragma: no cover - logging side effect
+            logging.error("Saving state failed: %s", exc)
         self.log(message, response, metrics)
         return response, metrics
 
@@ -153,7 +172,12 @@ class ProEngine:
             message = message.strip()
             if not message or message.lower() in {'exit', 'quit'}:
                 break
-            response, _ = await self.process_message(message)
+            try:
+                response, _ = await self.process_message(message)
+            except Exception as exc:  # pragma: no cover - logging side effect
+                logging.error("Processing message failed: %s", exc)
+                print("An error occurred. Please try again.")
+                continue
             print(response)
 
 

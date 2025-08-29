@@ -29,8 +29,7 @@ class ProEngine:
 
     async def setup(self) -> None:
         if os.path.exists(STATE_PATH):
-            with open(STATE_PATH, 'r', encoding='utf-8') as fh:
-                self.state = json.load(fh)
+            self.state = pro_tune.load_state(STATE_PATH)
         for key in [
             'word_counts',
             'bigram_counts',
@@ -40,29 +39,25 @@ class ProEngine:
             self.state.setdefault(key, {})
         if not self.state['word_counts']:
             dataset_path = 'datasets/lines01.txt'
-            if os.path.exists(dataset_path):
-                if os.path.getsize(dataset_path) > 0:
-                    try:
-                        await asyncio.to_thread(
-                            pro_tune.train, self.state, dataset_path
-                        )  # noqa: E501
-                        await self.save_state()
-                    except Exception as exc:
-                        logging.error(
-                            "Initial training failed: %s", exc
-                        )  # pragma: no cover - logging side effect
-                else:
-                    logging.warning(
-                        "Dataset path %s is empty; "
-                        "skipping initial training",
-                        dataset_path,
-                    )
-            else:
+            if not os.path.exists(dataset_path):
                 logging.warning(
-                    "Dataset path %s does not exist; "
-                    "skipping initial training",
+                    "Dataset path %s does not exist; skipping initial training",
                     dataset_path,
                 )
+            elif os.path.getsize(dataset_path) == 0:
+                logging.warning(
+                    "Dataset path %s is empty; skipping initial training",
+                    dataset_path,
+                )
+            else:
+                try:
+                    await asyncio.to_thread(pro_tune.train, self.state, dataset_path)
+                    await self.save_state()
+                    logging.info("Initial training succeeded on %s", dataset_path)
+                except Exception as exc:
+                    logging.error(
+                        "Initial training failed: %s", exc
+                    )  # pragma: no cover - logging side effect
         await pro_memory.init_db()
         logging.basicConfig(
             filename=LOG_PATH, level=logging.INFO, format='%(message)s'
@@ -71,10 +66,7 @@ class ProEngine:
         asyncio.create_task(self._dataset_watcher())
 
     async def save_state(self) -> None:
-        def _write():
-            with open(STATE_PATH, 'w', encoding='utf-8') as fh:
-                json.dump(self.state, fh)
-        await asyncio.to_thread(_write)
+        await asyncio.to_thread(pro_tune.save_state, self.state, STATE_PATH)
 
     async def scan_datasets(self) -> None:
         if not os.path.exists('datasets'):

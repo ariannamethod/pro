@@ -4,6 +4,7 @@ import os
 import hashlib
 import asyncio
 import math
+import random
 from typing import Dict, List, Tuple, Set, Optional
 from collections import Counter
 
@@ -25,13 +26,18 @@ LOG_PATH = 'pro.log'
 
 
 class ProEngine:
-    def __init__(self) -> None:
+    def __init__(self, chaos_factor: float = 0.0) -> None:
         self.state: Dict = {
             'word_counts': {},
             'bigram_counts': {},
             'trigram_counts': {},
             'char_ngram_counts': {},
+            'word_inv': {},
+            'bigram_inv': {},
+            'trigram_inv': {},
+            'char_ngram_inv': {},
         }
+        self.chaos_factor = chaos_factor
 
     async def setup(self) -> None:
         if os.path.exists(STATE_PATH):
@@ -41,8 +47,25 @@ class ProEngine:
             'bigram_counts',
             'trigram_counts',
             'char_ngram_counts',
+            'word_inv',
+            'bigram_inv',
+            'trigram_inv',
+            'char_ngram_inv',
         ]:
             self.state.setdefault(key, {})
+        # Recompute inverse-frequency maps from counts
+        for w, c in self.state['word_counts'].items():
+            self.state['word_inv'][w] = 1.0 / c
+        for prev, foll in self.state['bigram_counts'].items():
+            bi = self.state['bigram_inv'].setdefault(prev, {})
+            for w, c in foll.items():
+                bi[w] = 1.0 / c
+        for key, foll in self.state['trigram_counts'].items():
+            ti = self.state['trigram_inv'].setdefault(key, {})
+            for w, c in foll.items():
+                ti[w] = 1.0 / c
+        for ngram, c in self.state['char_ngram_counts'].items():
+            self.state['char_ngram_inv'][ngram] = 1.0 / c
         if not self.state['word_counts']:
             dataset_path = 'datasets/lines01.txt'
             if not os.path.exists(dataset_path):
@@ -168,6 +191,7 @@ class ProEngine:
         target_length: int,
         beam_width: int = 3,
         forbidden: Optional[Set[str]] = None,
+        chaos_factor: float = 0.0,
     ) -> List[str]:
         """Plan a sentence using beam search.
 
@@ -178,6 +202,9 @@ class ProEngine:
         bigram_counts = self.state.get("bigram_counts", {})
         word_counts = self.state.get("word_counts", {})
         char_counts = self.state.get("char_ngram_counts", {})
+        trigram_inv = self.state.get("trigram_inv", {})
+        bigram_inv = self.state.get("bigram_inv", {})
+        word_inv = self.state.get("word_inv", {})
 
         base_used: Set[str] = set(w.lower() for w in forbidden or [])
         start_seq: List[str] = []
@@ -225,6 +252,14 @@ class ProEngine:
                         char_counts,
                     )
                     score = metrics["entropy"] - metrics["trigram_perplexity"]
+                    if chaos_factor:
+                        inv = trigram_inv.get((prev2, prev1), {}).get(
+                            cand,
+                            bigram_inv.get(prev1, {}).get(
+                                cand, word_inv.get(cand, 0.0)
+                            ),
+                        )
+                        score += chaos_factor * inv * random.random()
                     new_beams.append((score, new_seq, new_used))
             if not new_beams:
                 break
@@ -234,12 +269,16 @@ class ProEngine:
         return best_seq[:target_length]
 
     def respond(
-        self, seeds: List[str], vocab: Optional[Dict[str, int]] = None
+        self,
+        seeds: List[str],
+        vocab: Optional[Dict[str, int]] = None,
+        chaos_factor: Optional[float] = None,
     ) -> str:
         if not seeds:
             return "Silence echoes within void."
 
         vocab = vocab or {}
+        cf = self.chaos_factor if chaos_factor is None else chaos_factor
         ordered_vocab = [
             w for w, _ in sorted(vocab.items(), key=lambda x: x[1], reverse=True)
         ]
@@ -275,7 +314,7 @@ class ProEngine:
                 self.state.get("char_ngram_counts", {}),
             )
             target_length = target_length_from_metrics(metrics)
-            words = self.plan_sentence(words, target_length)
+            words = self.plan_sentence(words, target_length, chaos_factor=cf)
             first = words[0]
             if first and first[0].isalpha():
                 first = first[0].upper() + first[1:]
@@ -333,6 +372,7 @@ class ProEngine:
                 second_seeds + ordered,
                 target_length2,
                 forbidden=set(first_words),
+                chaos_factor=cf,
             )
             first2 = words2[0]
             if first2 and first2[0].isalpha():
@@ -421,7 +461,12 @@ class ProEngine:
             if w in mem_counts and w in data_counts:
                 weight *= 2
             combined_vocab[w] = weight
-        response = self.respond(seed_words, combined_vocab)
+        if self.chaos_factor:
+            response = self.respond(
+                seed_words, combined_vocab, chaos_factor=self.chaos_factor
+            )
+        else:
+            response = self.respond(seed_words, combined_vocab)
         try:
             await pro_memory.add_message(response)
         except Exception as exc:  # pragma: no cover - logging side effect

@@ -27,6 +27,8 @@ def train(state: Dict, dataset_path: str) -> Dict:
 
 def _serialize_state(state: Dict) -> Dict:
     data = dict(state)
+    for k in ['word_inv', 'bigram_inv', 'trigram_inv', 'char_ngram_inv']:
+        data.pop(k, None)
     tc = {
         f"{k[0]}{_SEP}{k[1]}": v
         for k, v in state.get('trigram_counts', {}).items()

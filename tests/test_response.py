@@ -1,4 +1,8 @@
+import asyncio
+import sqlite3
+
 import pro_engine
+import pro_memory
 
 
 def test_response_uses_trigram_prediction():
@@ -34,3 +38,31 @@ def test_preserves_first_word_capitalization():
     }
     sentence = engine.respond(["NASA", "launch"])
     assert sentence == "NASA launch window opens today."
+
+
+def test_duplicate_responses_suppressed(tmp_path, monkeypatch):
+    db_path = tmp_path / "mem.db"
+    monkeypatch.setattr(pro_memory, "DB_PATH", str(db_path))
+    asyncio.run(pro_memory.init_db())
+    engine = pro_engine.ProEngine()
+    engine.state["trigram_counts"] = {
+        ("hello", "world"): {"foo": 1},
+        ("world", "foo"): {"bar": 1},
+        ("foo", "bar"): {"baz": 1},
+    }
+    engine.state["word_counts"] = {
+        "hello": 5,
+        "world": 4,
+        "foo": 3,
+        "bar": 2,
+        "baz": 1,
+    }
+    first = engine.respond(["hello", "world"])
+    second = engine.respond(["hello", "world"])
+    assert first != second
+    conn = sqlite3.connect(pro_memory.DB_PATH)
+    cur = conn.cursor()
+    cur.execute("SELECT COUNT(*) FROM responses")
+    count = cur.fetchone()[0]
+    conn.close()
+    assert count == 2

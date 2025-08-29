@@ -4,6 +4,7 @@ import os
 import hashlib
 import asyncio
 from typing import Dict, List, Tuple
+from collections import Counter
 
 from pro_metrics import tokenize, compute_metrics, lowercase
 import pro_tune
@@ -72,9 +73,9 @@ class ProEngine:
         await self.save_state()
 
     def compute_charged_words(self, words: List[str]) -> List[str]:
+        word_counts = Counter(words)
         charges: Dict[str, float] = {}
-        for w in words:
-            freq = words.count(w)
+        for w, freq in word_counts.items():
             successors = len(self.state['bigram_counts'].get(w, {}))
             charges[w] = freq * (1 + successors)
         ordered = sorted(charges, key=charges.get, reverse=True)

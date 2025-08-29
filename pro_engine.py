@@ -43,6 +43,8 @@ class ProEngine:
         self.similarity_threshold = similarity_threshold
 
     async def setup(self) -> None:
+        pro_predict._GRAPH = {}
+        pro_predict._VECTORS = {}
         if os.path.exists(STATE_PATH):
             self.state = pro_tune.load_state(STATE_PATH)
         for key in [
@@ -294,12 +296,25 @@ class ProEngine:
         extra_idx = 0
         while True:
             # ----- First sentence -----
+            metrics = compute_metrics(
+                [w.lower() for w in attempt_seeds if w],
+                self.state.get("trigram_counts", {}),
+                self.state.get("bigram_counts", {}),
+                self.state.get("word_counts", {}),
+                self.state.get("char_ngram_counts", {}),
+            )
+            target_length = target_length_from_metrics(metrics)
             words: List[str] = []
             tracker: Set[str] = set()
             for w in attempt_seeds:
-                if w and w not in tracker:
-                    words.append(w)
-                    tracker.add(w)
+                analog = pro_predict.lookup_analogs(w.lower()) or w
+                if w.isupper():
+                    analog = analog.upper()
+                elif w and w[0].isupper():
+                    analog = analog[0].upper() + analog[1:]
+                if analog and analog not in tracker:
+                    words.append(analog)
+                    tracker.add(analog)
             word_counts = self.state.get("word_counts", {})
             combined_counts: Dict[str, float] = dict(word_counts)
             for w, weight in vocab.items():
@@ -315,14 +330,6 @@ class ProEngine:
                     tracker.add(w)
             while len(words) < 2:
                 words.append("")
-            metrics = compute_metrics(
-                [w.lower() for w in words if w],
-                self.state.get("trigram_counts", {}),
-                self.state.get("bigram_counts", {}),
-                self.state.get("word_counts", {}),
-                self.state.get("char_ngram_counts", {}),
-            )
-            target_length = target_length_from_metrics(metrics)
             words = self.plan_sentence(words, target_length, chaos_factor=cf)
             first = words[0]
             if first and first[0].isalpha():

@@ -1,14 +1,13 @@
-import pytest
+import asyncio
 import pro_engine
 import pro_memory
 import pro_rag
 import pro_tune
 
 
-@pytest.mark.asyncio
-async def test_process_message_resilience(monkeypatch):
+def test_process_message_resilience(monkeypatch):
     engine = pro_engine.ProEngine()
-    await engine.setup()
+    asyncio.run(engine.setup())
 
     orig_add = pro_memory.add_message
     orig_retrieve = pro_rag.retrieve
@@ -22,20 +21,19 @@ async def test_process_message_resilience(monkeypatch):
     monkeypatch.setattr(pro_memory, "add_message", failing_add_message)
     monkeypatch.setattr(pro_rag, "retrieve", failing_retrieve)
 
-    response, metrics = await engine.process_message("hello world")
+    response, metrics = asyncio.run(engine.process_message("hello world"))
     assert isinstance(response, str)
     assert isinstance(metrics, dict)
 
     monkeypatch.setattr(pro_memory, "add_message", orig_add)
     monkeypatch.setattr(pro_rag, "retrieve", orig_retrieve)
 
-    response2, metrics2 = await engine.process_message("second message")
+    response2, metrics2 = asyncio.run(engine.process_message("second message"))
     assert isinstance(response2, str)
     assert isinstance(metrics2, dict)
 
 
-@pytest.mark.asyncio
-async def test_async_tune_resilience(monkeypatch):
+def test_async_tune_resilience(monkeypatch):
     engine = pro_engine.ProEngine()
 
     def failing_train(state, path):
@@ -43,4 +41,4 @@ async def test_async_tune_resilience(monkeypatch):
 
     monkeypatch.setattr(pro_tune, "train", failing_train)
 
-    await engine._async_tune()
+    asyncio.run(engine._async_tune(["dummy"]))

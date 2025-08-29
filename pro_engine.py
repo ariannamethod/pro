@@ -320,6 +320,23 @@ class ProEngine:
         predicted: List[str] = []
         for w in unknown:
             predicted.extend(pro_predict.suggest(w))
+        # Blend n-gram prediction with transformer logits
+        ngram_pred = ""
+        if words:
+            prev2 = words[-2] if len(words) >= 2 else ""
+            prev1 = words[-1]
+            ngram_pred = self.predict_next_word(prev2, prev1)
+        trans_pred = ""
+        vocab = list(self.state.get("word_counts", {}).keys())
+        if vocab:
+            logits = pro_predict.transformer_logits(words[-5:], vocab)
+            trans_pred = max(logits, key=logits.get)
+        blend: List[str] = []
+        if ngram_pred:
+            blend.append(ngram_pred)
+        if trans_pred and trans_pred != ngram_pred:
+            blend.append(trans_pred)
+        predicted.extend(blend)
         try:
             await pro_memory.add_message(message)
         except Exception as exc:  # pragma: no cover - logging side effect

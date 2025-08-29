@@ -30,7 +30,12 @@ class ProEngine:
         if os.path.exists(STATE_PATH):
             with open(STATE_PATH, 'r', encoding='utf-8') as fh:
                 self.state = json.load(fh)
-        for key in ['word_counts', 'bigram_counts', 'trigram_counts', 'char_ngram_counts']:
+        for key in [
+            'word_counts',
+            'bigram_counts',
+            'trigram_counts',
+            'char_ngram_counts',
+        ]:
             self.state.setdefault(key, {})
         if not self.state['word_counts']:
             try:
@@ -101,11 +106,23 @@ class ProEngine:
         if not charged:
             return "Silence echoes within void."
         if len(charged) < 5:
-            charged = (charged * 5)[:5]
+            missing = 5 - len(charged)
+            word_counts = self.state.get("word_counts", {})
+            ordered = sorted(word_counts, key=word_counts.get, reverse=True)
+            additions: List[str] = []
+            for w in ordered:
+                if w and w not in charged and w not in additions:
+                    additions.append(w)
+                if len(additions) == missing:
+                    break
+            if len(additions) < missing:
+                for w in (charged * 5)[: missing - len(additions)]:
+                    additions.append(w)
+            charged = charged + additions
         first = charged[0]
         if first and first[0].isalpha():
             first = first[0].upper() + first[1:]
-        words = [first] + charged[1:]
+        words = [first] + charged[1:5]
         sentence = " ".join(filter(None, words)) + "."
         return sentence
 

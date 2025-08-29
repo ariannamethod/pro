@@ -16,3 +16,16 @@ def test_preserves_first_word_capitalization():
     sentence = engine.respond(["NASA", "launch", "window", "opens", "today"])
     words = sentence.rstrip(".").split()
     assert words[0] == "NASA"
+
+
+def test_fills_from_state_without_duplicates():
+    engine = pro_engine.ProEngine()
+    engine.state["word_counts"] = {
+        "alpha": 5,
+        "beta": 4,
+        "gamma": 3,
+        "delta": 2,
+    }
+    sentence = engine.respond(["hello"])
+    words = sentence.rstrip(".").split()
+    assert words == ["Hello", "alpha", "beta", "gamma", "delta"]

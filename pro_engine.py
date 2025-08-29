@@ -19,12 +19,19 @@ LOG_PATH = 'pro.log'
 
 class ProEngine:
     def __init__(self) -> None:
-        self.state: Dict = {'word_counts': {}, 'bigram_counts': {}}
+        self.state: Dict = {
+            'word_counts': {},
+            'bigram_counts': {},
+            'trigram_counts': {},
+            'char_ngram_counts': {},
+        }
 
     async def setup(self) -> None:
         if os.path.exists(STATE_PATH):
             with open(STATE_PATH, 'r', encoding='utf-8') as fh:
                 self.state = json.load(fh)
+        for key in ['word_counts', 'bigram_counts', 'trigram_counts', 'char_ngram_counts']:
+            self.state.setdefault(key, {})
         if not self.state['word_counts']:
             try:
                 await asyncio.to_thread(
@@ -104,7 +111,11 @@ class ProEngine:
         context_tokens = tokenize(' '.join(context))
         all_words = words + lowercase(context_tokens)
         metrics = compute_metrics(
-            all_words, self.state['bigram_counts'], self.state['word_counts']
+            all_words,
+            self.state['trigram_counts'],
+            self.state['bigram_counts'],
+            self.state['word_counts'],
+            self.state['char_ngram_counts'],
         )
         charged = self.compute_charged_words(original_words + context_tokens)
         response = self.respond(charged)

@@ -3,6 +3,7 @@ import os
 from typing import Dict
 
 from pro_metrics import tokenize, lowercase
+import pro_sequence
 
 STATE_PATH = 'pro_state.json'
 
@@ -13,15 +14,7 @@ def train(state: Dict, dataset_path: str) -> Dict:
     with open(dataset_path, 'r', encoding='utf-8') as fh:
         text = fh.read()
     words = lowercase(tokenize(text))
-    wc = state.setdefault('word_counts', {})
-    bc = state.setdefault('bigram_counts', {})
-    prev = '<s>'
-    wc[prev] = wc.get(prev, 0) + 1
-    for word in words:
-        wc[word] = wc.get(word, 0) + 1
-        bc.setdefault(prev, {})
-        bc[prev][word] = bc[prev].get(word, 0) + 1
-        prev = word
+    pro_sequence.analyze_sequences(state, words)
     return state
 
 

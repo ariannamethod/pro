@@ -1,4 +1,3 @@
-import asyncio
 import pytest
 import pro_engine
 import pro_memory

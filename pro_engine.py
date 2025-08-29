@@ -38,13 +38,23 @@ class ProEngine:
         ]:
             self.state.setdefault(key, {})
         if not self.state['word_counts']:
-            try:
-                await asyncio.to_thread(
-                    pro_tune.train, self.state, 'datasets/lines01.txt'
-                )  # noqa: E501
-                await self.save_state()
-            except Exception:
-                pass
+            dataset_path = 'datasets/lines01.txt'
+            if os.path.exists(dataset_path):
+                try:
+                    await asyncio.to_thread(
+                        pro_tune.train, self.state, dataset_path
+                    )  # noqa: E501
+                    await self.save_state()
+                except Exception as exc:
+                    logging.error(
+                        "Initial training failed: %s", exc
+                    )  # pragma: no cover - logging side effect
+            else:
+                logging.warning(
+                    "Dataset path %s does not exist; "
+                    "skipping initial training",
+                    dataset_path,
+                )
         await pro_memory.init_db()
         logging.basicConfig(
             filename=LOG_PATH, level=logging.INFO, format='%(message)s'

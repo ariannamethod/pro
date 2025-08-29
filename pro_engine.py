@@ -6,7 +6,12 @@ import asyncio
 from typing import Dict, List, Tuple
 from collections import Counter
 
-from pro_metrics import tokenize, compute_metrics, lowercase
+from pro_metrics import (
+    tokenize,
+    compute_metrics,
+    lowercase,
+    target_length_from_metrics,
+)
 import pro_tune
 import pro_sequence
 import pro_memory
@@ -176,34 +181,44 @@ class ProEngine:
         attempt_seeds = list(seeds)
         extra_idx = 0
         while True:
-            words = [w for w in attempt_seeds if w]
+            words: List[str] = []
+            used = set()
+            for w in attempt_seeds:
+                if w and w not in used:
+                    words.append(w)
+                    used.add(w)
             word_counts = self.state.get("word_counts", {})
             ordered = sorted(word_counts, key=word_counts.get, reverse=True)
             for w in ordered:
                 if len(words) >= 2:
                     break
-                if w and w not in words:
+                if w and w not in used:
                     words.append(w)
+                    used.add(w)
             while len(words) < 2:
                 words.append("")
-            while len(words) < 5:
+            metrics = compute_metrics(
+                [w.lower() for w in words if w],
+                self.state.get("trigram_counts", {}),
+                self.state.get("bigram_counts", {}),
+                self.state.get("word_counts", {}),
+                self.state.get("char_ngram_counts", {}),
+            )
+            target_length = target_length_from_metrics(metrics)
+            while len(words) < target_length:
                 prev2, prev1 = words[-2], words[-1]
                 nxt = self.predict_next_word(prev2, prev1)
-                if not nxt or nxt in words:
-                    fallback = next(
-                        (w for w in ordered if w and w not in words),
-                        None,
-                    )
-                    if fallback is not None:
-                        nxt = fallback
-                    else:
-                        nxt = words[(len(words)) % len(words)]
+                if not nxt or nxt in used:
+                    nxt = next((w for w in ordered if w not in used), None)
+                    if nxt is None:
+                        nxt = f"alt{len(used)}"
                 words.append(nxt)
+                used.add(nxt)
             first = words[0]
             if first and first[0].isalpha():
                 first = first[0].upper() + first[1:]
             words[0] = first
-            sentence = " ".join(filter(None, words[:5])) + "."
+            sentence = " ".join(filter(None, words[:target_length])) + "."
             if pro_memory.is_unique(sentence):
                 pro_memory.store_response(sentence)
                 return sentence

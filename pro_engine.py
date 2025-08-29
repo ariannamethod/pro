@@ -19,6 +19,7 @@ import pro_sequence
 import pro_memory
 import pro_rag
 import pro_predict
+from pro_identity import swap_pronouns
 
 STATE_PATH = 'pro_state.json'
 HASH_PATH = 'dataset_sha.json'
@@ -418,6 +419,7 @@ class ProEngine:
     async def process_message(self, message: str) -> Tuple[str, Dict]:
         original_words = tokenize(message)
         words = lowercase(original_words)
+        words = swap_pronouns(words)
         unknown: List[str] = [
             w for w in words if w not in self.state['word_counts']
         ]

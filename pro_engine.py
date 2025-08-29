@@ -352,6 +352,7 @@ class ProEngine:
             self.state,
             lowercase(tokenize(response)),
         )
+        await pro_predict.update(words + lowercase(tokenize(response)))
         try:
             await self.save_state()
         except Exception as exc:  # pragma: no cover - logging side effect

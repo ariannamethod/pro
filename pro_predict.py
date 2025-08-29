@@ -51,6 +51,25 @@ def _ensure_vectors() -> None:
     _VECTORS = _build_embeddings(_GRAPH)
 
 
+async def update(word_list: List[str]) -> None:
+    """Update the co-occurrence graph and vectors with new words.
+
+    The *word_list* should contain individual tokens. After the update the
+    words become part of the internal vocabulary used by :func:`suggest`.
+    """
+    global _VECTORS
+    _ensure_vectors()
+    words = lowercase(word_list)
+    for i, word in enumerate(words):
+        for j in range(i + 1, len(words)):
+            other = words[j]
+            if not word or not other:
+                continue
+            _GRAPH.setdefault(word, Counter())[other] += 1
+            _GRAPH.setdefault(other, Counter())[word] += 1
+    _VECTORS = _build_embeddings(_GRAPH)
+
+
 def suggest(word: str, topn: int = 3) -> List[str]:
     """Return up to *topn* words semantically close to *word*.
 

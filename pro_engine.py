@@ -116,7 +116,11 @@ class ProEngine:
         tuned: List[str] = []
         for path in paths:
             try:
-                await asyncio.to_thread(pro_tune.train, self.state, path)
+                new_state = await asyncio.to_thread(
+                    pro_tune.train, self.state, path
+                )
+                if new_state is not None:
+                    self.state = new_state
                 tuned.append(os.path.basename(path))
             except Exception as exc:  # pragma: no cover - logging side effect
                 logging.error("Tuning failed for %s: %s", path, exc)
@@ -200,9 +204,13 @@ class ProEngine:
                     fallback = [w for w in global_order if w not in ordered]
                     ordered.extend(fallback)
                 else:
-                    ordered = [w for w in global_order if w.lower() not in used]
+                    ordered = [
+                        w for w in global_order if w.lower() not in used
+                    ]
                 if not ordered:
-                    ordered = [f"alt{len(used)+i}" for i in range(beam_width * 2)]
+                    ordered = [
+                        f"alt{len(used)+i}" for i in range(beam_width * 2)
+                    ]
                 for cand in ordered[: beam_width * 2]:
                     lw = cand.lower()
                     if lw in used:
@@ -399,6 +407,26 @@ class ProEngine:
             await pro_memory.add_message(response)
         except Exception as exc:  # pragma: no cover - logging side effect
             logging.error("Storing response failed: %s", exc)
+        dataset_path = os.path.join('datasets', 'conversation.log')
+        try:
+            os.makedirs('datasets', exist_ok=True)
+            with open(dataset_path, 'a', encoding='utf-8') as fh:
+                fh.write(f"{message}\n{response}\n")
+            try:
+                with open(dataset_path, 'rb') as fh:
+                    digest = hashlib.sha256(fh.read()).hexdigest()
+                hashes = {}
+                if os.path.exists(HASH_PATH):
+                    with open(HASH_PATH, 'r', encoding='utf-8') as fh:
+                        hashes = json.load(fh)
+                hashes[os.path.basename(dataset_path)] = digest
+                with open(HASH_PATH, 'w', encoding='utf-8') as fh:
+                    json.dump(hashes, fh)
+            except Exception as exc:  # pragma: no cover - logging side effect
+                logging.error("Updating dataset hash failed: %s", exc)
+            asyncio.create_task(self._async_tune([dataset_path]))
+        except Exception as exc:  # pragma: no cover - logging side effect
+            logging.error("Logging conversation failed: %s", exc)
         await asyncio.to_thread(
             pro_sequence.analyze_sequences, self.state, words
         )

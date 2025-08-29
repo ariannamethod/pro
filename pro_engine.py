@@ -11,6 +11,7 @@ import pro_tune
 import pro_sequence
 import pro_memory
 import pro_rag
+import pro_predict
 
 STATE_PATH = 'pro_state.json'
 HASH_PATH = 'dataset_sha.json'
@@ -183,6 +184,12 @@ class ProEngine:
     async def process_message(self, message: str) -> Tuple[str, Dict]:
         original_words = tokenize(message)
         words = lowercase(original_words)
+        unknown: List[str] = [
+            w for w in words if w not in self.state['word_counts']
+        ]
+        predicted: List[str] = []
+        for w in unknown:
+            predicted.extend(pro_predict.suggest(w))
         try:
             await pro_memory.add_message(message)
         except Exception as exc:  # pragma: no cover - logging side effect
@@ -201,7 +208,7 @@ class ProEngine:
             self.state['word_counts'],
             self.state['char_ngram_counts'],
         )
-        seed_words = original_words + context_tokens
+        seed_words = original_words + context_tokens + predicted
         response = self.respond(seed_words)
         try:
             await pro_memory.add_message(response)

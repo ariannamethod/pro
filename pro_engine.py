@@ -112,28 +112,51 @@ class ProEngine:
         ordered = sorted(charges, key=charges.get, reverse=True)
         return ordered[:5]
 
-    def respond(self, charged: List[str]) -> str:
-        if not charged:
+    def predict_next_word(self, prev2: str, prev1: str) -> str:
+        tc = self.state.get("trigram_counts", {})
+        bc = self.state.get("bigram_counts", {})
+        wc = self.state.get("word_counts", {})
+        candidates = tc.get((prev2, prev1))
+        if candidates:
+            return max(candidates, key=candidates.get)
+        candidates2 = bc.get(prev1)
+        if candidates2:
+            return max(candidates2, key=candidates2.get)
+        if wc:
+            return max(wc, key=wc.get)
+        return ""
+
+    def respond(self, seeds: List[str]) -> str:
+        if not seeds:
             return "Silence echoes within void."
-        if len(charged) < 5:
-            missing = 5 - len(charged)
-            word_counts = self.state.get("word_counts", {})
-            ordered = sorted(word_counts, key=word_counts.get, reverse=True)
-            additions: List[str] = []
-            for w in ordered:
-                if w and w not in charged and w not in additions:
-                    additions.append(w)
-                if len(additions) == missing:
-                    break
-            if len(additions) < missing:
-                for w in (charged * 5)[: missing - len(additions)]:
-                    additions.append(w)
-            charged = charged + additions
-        first = charged[0]
+        words = [w for w in seeds if w]
+        word_counts = self.state.get("word_counts", {})
+        ordered = sorted(word_counts, key=word_counts.get, reverse=True)
+        for w in ordered:
+            if len(words) >= 2:
+                break
+            if w and w not in words:
+                words.append(w)
+        while len(words) < 2:
+            words.append("")
+        while len(words) < 5:
+            prev2, prev1 = words[-2], words[-1]
+            nxt = self.predict_next_word(prev2, prev1)
+            if not nxt or nxt in words:
+                fallback = next(
+                    (w for w in ordered if w and w not in words),
+                    None,
+                )
+                if fallback is not None:
+                    nxt = fallback
+                else:
+                    nxt = words[(len(words)) % len(words)]
+            words.append(nxt)
+        first = words[0]
         if first and first[0].isalpha():
             first = first[0].upper() + first[1:]
-        words = [first] + charged[1:5]
-        sentence = " ".join(filter(None, words)) + "."
+        words[0] = first
+        sentence = " ".join(filter(None, words[:5])) + "."
         return sentence
 
     async def process_message(self, message: str) -> Tuple[str, Dict]:
@@ -157,8 +180,8 @@ class ProEngine:
             self.state['word_counts'],
             self.state['char_ngram_counts'],
         )
-        charged = self.compute_charged_words(original_words + context_tokens)
-        response = self.respond(charged)
+        seed_words = original_words + context_tokens
+        response = self.respond(seed_words)
         try:
             await pro_memory.add_message(response)
         except Exception as exc:  # pragma: no cover - logging side effect

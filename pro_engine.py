@@ -1,12 +1,15 @@
 import json
 import logging
 import os
-import threading
 import hashlib
-from typing import Dict, List
+import asyncio
+from typing import Dict, List, Tuple
 
 from pro_metrics import tokenize, compute_metrics
 import pro_tune
+import pro_sequence
+import pro_memory
+import pro_rag
 
 STATE_PATH = 'pro_state.json'
 HASH_PATH = 'dataset_sha.json'
@@ -14,24 +17,30 @@ LOG_PATH = 'pro.log'
 
 
 class ProEngine:
-    def __init__(self):
+    def __init__(self) -> None:
         self.state: Dict = {'word_counts': {}, 'bigram_counts': {}}
+
+    async def setup(self) -> None:
         if os.path.exists(STATE_PATH):
             with open(STATE_PATH, 'r', encoding='utf-8') as fh:
                 self.state = json.load(fh)
         if not self.state['word_counts']:
-            # initial training
-            pro_tune.train(self.state, 'datasets/lines01.txt')
-            self.save_state()
+            try:
+                await asyncio.to_thread(pro_tune.train, self.state, 'datasets/lines01.txt')
+                await self.save_state()
+            except Exception:
+                pass
+        await pro_memory.init_db()
         logging.basicConfig(filename=LOG_PATH, level=logging.INFO, format='%(message)s')
-        self.scan_datasets()
+        await self.scan_datasets()
 
-    def save_state(self) -> None:
-        with open(STATE_PATH, 'w', encoding='utf-8') as fh:
-            json.dump(self.state, fh)
+    async def save_state(self) -> None:
+        def _write():
+            with open(STATE_PATH, 'w', encoding='utf-8') as fh:
+                json.dump(self.state, fh)
+        await asyncio.to_thread(_write)
 
-    def scan_datasets(self) -> None:
-        """Scan datasets directory and trigger async tuning on change."""
+    async def scan_datasets(self) -> None:
         if not os.path.exists('datasets'):
             return
         new_hashes = {}
@@ -50,13 +59,13 @@ class ProEngine:
         with open(HASH_PATH, 'w', encoding='utf-8') as fh:
             json.dump(new_hashes, fh)
         if changed:
-            threading.Thread(target=self._async_tune, daemon=True).start()
+            asyncio.create_task(self._async_tune())
 
-    def _async_tune(self):
+    async def _async_tune(self) -> None:
         for name in os.listdir('datasets'):
             path = os.path.join('datasets', name)
-            pro_tune.train(self.state, path)
-        self.save_state()
+            await asyncio.to_thread(pro_tune.train, self.state, path)
+        await self.save_state()
 
     def compute_charged_words(self, words: List[str]) -> List[str]:
         charges: Dict[str, float] = {}
@@ -75,43 +84,37 @@ class ProEngine:
         sentence = charged[0].capitalize() + ' ' + ' '.join(charged[1:]) + '.'
         return sentence
 
-    def update_model(self, words: List[str]) -> None:
-        wc = self.state.setdefault('word_counts', {})
-        bc = self.state.setdefault('bigram_counts', {})
-        prev = '<s>'
-        wc[prev] = wc.get(prev, 0) + 1
-        for word in words:
-            wc[word] = wc.get(word, 0) + 1
-            bc.setdefault(prev, {})
-            bc[prev][word] = bc[prev].get(word, 0) + 1
-            prev = word
-        self.save_state()
+    async def process_message(self, message: str) -> Tuple[str, Dict]:
+        words = tokenize(message)
+        await pro_memory.add_message(message)
+        context = await pro_rag.retrieve(words)
+        all_words = words + tokenize(' '.join(context))
+        metrics = compute_metrics(all_words, self.state['bigram_counts'], self.state['word_counts'])
+        charged = self.compute_charged_words(all_words)
+        response = self.respond(charged)
+        await pro_memory.add_message(response)
+        await asyncio.to_thread(pro_sequence.analyze_sequences, self.state, words)
+        await asyncio.to_thread(pro_sequence.analyze_sequences, self.state, tokenize(response))
+        await self.save_state()
+        self.log(message, response, metrics)
+        return response, metrics
 
     def log(self, user: str, response: str, metrics: Dict) -> None:
         logging.info(json.dumps({'user': user, 'response': response, 'metrics': metrics}))
 
-    def analyze(self, message: str):
-        words = tokenize(message)
-        metrics = compute_metrics(words, self.state['bigram_counts'], self.state['word_counts'])
-        charged = self.compute_charged_words(words)
-        return metrics, charged
-
-    def interact(self) -> None:
+    async def interact(self) -> None:
+        await self.setup()
         while True:
             try:
-                message = input('> ').strip()
+                message = await asyncio.to_thread(input, '> ')
             except EOFError:
                 break
+            message = message.strip()
             if not message or message.lower() in {'exit', 'quit'}:
                 break
-            metrics, charged = self.analyze(message)
-            response = self.respond(charged)
+            response, _ = await self.process_message(message)
             print(response)
-            self.log(message, response, metrics)
-            self.update_model(tokenize(message))
-            self.update_model(tokenize(response))
 
 
 if __name__ == '__main__':
-    engine = ProEngine()
-    engine.interact()
+    asyncio.run(ProEngine().interact())

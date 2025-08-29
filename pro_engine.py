@@ -60,6 +60,7 @@ class ProEngine:
             filename=LOG_PATH, level=logging.INFO, format='%(message)s'
         )  # noqa: E501
         await self.scan_datasets()
+        asyncio.create_task(self._dataset_watcher())
 
     async def save_state(self) -> None:
         def _write():
@@ -70,7 +71,12 @@ class ProEngine:
     async def scan_datasets(self) -> None:
         if not os.path.exists('datasets'):
             return
-        new_hashes = {}
+        old_hashes: Dict[str, str] = {}
+        if os.path.exists(HASH_PATH):
+            with open(HASH_PATH, 'r', encoding='utf-8') as fh:
+                old_hashes = json.load(fh)
+        new_hashes: Dict[str, str] = {}
+        changed_files: List[str] = []
         for name in os.listdir('datasets'):
             path = os.path.join('datasets', name)
             if not os.path.isfile(path):
@@ -78,30 +84,45 @@ class ProEngine:
             with open(path, 'rb') as fh:
                 digest = hashlib.sha256(fh.read()).hexdigest()
             new_hashes[name] = digest
-        old_hashes = {}
-        if os.path.exists(HASH_PATH):
-            with open(HASH_PATH, 'r', encoding='utf-8') as fh:
-                old_hashes = json.load(fh)
-        changed = (
-            set(old_hashes) != set(new_hashes)
-            or any(old_hashes.get(k) != v for k, v in new_hashes.items())
-        )
+            if old_hashes.get(name) != digest:
+                changed_files.append(path)
+        removed = set(old_hashes) - set(new_hashes)
+        if removed and not new_hashes:
+            with open(HASH_PATH, 'w', encoding='utf-8') as fh:
+                json.dump(new_hashes, fh)
+            asyncio.create_task(self._async_tune([]))
+            return
+        if removed:
+            changed_files = [
+                os.path.join('datasets', n) for n in new_hashes.keys()
+            ]
         with open(HASH_PATH, 'w', encoding='utf-8') as fh:
             json.dump(new_hashes, fh)
-        if changed:
-            asyncio.create_task(self._async_tune())
+        if changed_files:
+            asyncio.create_task(self._async_tune(changed_files))
 
-    async def _async_tune(self) -> None:
-        for name in os.listdir('datasets'):
-            path = os.path.join('datasets', name)
+    async def _async_tune(self, paths: List[str]) -> None:
+        tuned: List[str] = []
+        for path in paths:
             try:
                 await asyncio.to_thread(pro_tune.train, self.state, path)
+                tuned.append(os.path.basename(path))
             except Exception as exc:  # pragma: no cover - logging side effect
                 logging.error("Tuning failed for %s: %s", path, exc)
         try:
             await self.save_state()
         except Exception as exc:  # pragma: no cover - logging side effect
             logging.error("Saving state failed after tuning: %s", exc)
+        if tuned:
+            logging.info("Tuned datasets: %s", ", ".join(tuned))
+
+    async def _dataset_watcher(self) -> None:
+        while True:
+            try:
+                await self.scan_datasets()
+            except Exception as exc:  # pragma: no cover - logging side effect
+                logging.error("Dataset scan failed: %s", exc)
+            await asyncio.sleep(60)
 
     def compute_charged_words(self, words: List[str]) -> List[str]:
         word_counts = Counter(words)

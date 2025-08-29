@@ -60,7 +60,10 @@ class ProEngine:
         if os.path.exists(HASH_PATH):
             with open(HASH_PATH, 'r', encoding='utf-8') as fh:
                 old_hashes = json.load(fh)
-        changed = any(old_hashes.get(k) != v for k, v in new_hashes.items())
+        changed = (
+            set(old_hashes) != set(new_hashes)
+            or any(old_hashes.get(k) != v for k, v in new_hashes.items())
+        )
         with open(HASH_PATH, 'w', encoding='utf-8') as fh:
             json.dump(new_hashes, fh)
         if changed:

@@ -2,7 +2,7 @@ import json
 import os
 from typing import Dict
 
-from pro_metrics import tokenize
+from pro_metrics import tokenize, lowercase
 
 STATE_PATH = 'pro_state.json'
 
@@ -12,7 +12,7 @@ def train(state: Dict, dataset_path: str) -> Dict:
         return state
     with open(dataset_path, 'r', encoding='utf-8') as fh:
         text = fh.read()
-    words = tokenize(text)
+    words = lowercase(tokenize(text))
     wc = state.setdefault('word_counts', {})
     bc = state.setdefault('bigram_counts', {})
     prev = '<s>'

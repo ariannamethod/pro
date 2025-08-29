@@ -6,8 +6,13 @@ TOKEN_RE = re.compile(r"\b\w+\b")
 
 
 def tokenize(text: str):
-    """Split text into lowercase tokens."""
-    return TOKEN_RE.findall(text.lower())
+    """Split text into tokens without altering case."""
+    return TOKEN_RE.findall(text)
+
+
+def lowercase(words):
+    """Return a lowercase copy of tokens for case-insensitive metrics."""
+    return [w.lower() for w in words]
 
 
 def entropy(words):

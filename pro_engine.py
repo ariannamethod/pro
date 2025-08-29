@@ -5,7 +5,7 @@ import hashlib
 import asyncio
 from typing import Dict, List, Tuple
 
-from pro_metrics import tokenize, compute_metrics
+from pro_metrics import tokenize, compute_metrics, lowercase
 import pro_tune
 import pro_sequence
 import pro_memory
@@ -26,12 +26,16 @@ class ProEngine:
                 self.state = json.load(fh)
         if not self.state['word_counts']:
             try:
-                await asyncio.to_thread(pro_tune.train, self.state, 'datasets/lines01.txt')
+                await asyncio.to_thread(
+                    pro_tune.train, self.state, 'datasets/lines01.txt'
+                )  # noqa: E501
                 await self.save_state()
             except Exception:
                 pass
         await pro_memory.init_db()
-        logging.basicConfig(filename=LOG_PATH, level=logging.INFO, format='%(message)s')
+        logging.basicConfig(
+            filename=LOG_PATH, level=logging.INFO, format='%(message)s'
+        )  # noqa: E501
         await self.scan_datasets()
 
     async def save_state(self) -> None:
@@ -85,22 +89,40 @@ class ProEngine:
         return sentence
 
     async def process_message(self, message: str) -> Tuple[str, Dict]:
-        words = tokenize(message)
+        original_words = tokenize(message)
+        words = lowercase(original_words)
         await pro_memory.add_message(message)
         context = await pro_rag.retrieve(words)
-        all_words = words + tokenize(' '.join(context))
-        metrics = compute_metrics(all_words, self.state['bigram_counts'], self.state['word_counts'])
-        charged = self.compute_charged_words(all_words)
+        context_tokens = tokenize(' '.join(context))
+        all_words = words + lowercase(context_tokens)
+        metrics = compute_metrics(
+            all_words, self.state['bigram_counts'], self.state['word_counts']
+        )
+        charged = self.compute_charged_words(original_words + context_tokens)
         response = self.respond(charged)
         await pro_memory.add_message(response)
-        await asyncio.to_thread(pro_sequence.analyze_sequences, self.state, words)
-        await asyncio.to_thread(pro_sequence.analyze_sequences, self.state, tokenize(response))
+        await asyncio.to_thread(
+            pro_sequence.analyze_sequences, self.state, words
+        )
+        await asyncio.to_thread(
+            pro_sequence.analyze_sequences,
+            self.state,
+            lowercase(tokenize(response)),
+        )
         await self.save_state()
         self.log(message, response, metrics)
         return response, metrics
 
     def log(self, user: str, response: str, metrics: Dict) -> None:
-        logging.info(json.dumps({'user': user, 'response': response, 'metrics': metrics}))
+        logging.info(
+            json.dumps(
+                {
+                    'user': user,
+                    'response': response,
+                    'metrics': metrics,
+                }
+            )
+        )
 
     async def interact(self) -> None:
         await self.setup()

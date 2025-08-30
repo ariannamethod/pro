@@ -47,21 +47,24 @@ async def send_message(chat_id: int, text: str) -> None:
 async def main() -> None:
     await engine.setup()
     offset = None
-    while True:
-        try:
-            updates = await get_updates(offset)
-            for update in updates:
-                offset = update["update_id"] + 1
-                message = update.get("message") or {}
-                text = message.get("text")
-                chat = message.get("chat") or {}
-                chat_id = chat.get("id")
-                if chat_id and text:
-                    response, _ = await engine.process_message(text)
-                    await send_message(chat_id, response)
-        except Exception as exc:  # pragma: no cover - logging only
-            print(f"Error: {exc}")
-            await asyncio.sleep(1)
+    try:
+        while True:
+            try:
+                updates = await get_updates(offset)
+                for update in updates:
+                    offset = update["update_id"] + 1
+                    message = update.get("message") or {}
+                    text = message.get("text")
+                    chat = message.get("chat") or {}
+                    chat_id = chat.get("id")
+                    if chat_id and text:
+                        response, _ = await engine.process_message(text)
+                        await send_message(chat_id, response)
+            except Exception as exc:  # pragma: no cover - logging only
+                print(f"Error: {exc}")
+                await asyncio.sleep(1)
+    finally:
+        await engine.shutdown()
 
 
 if __name__ == "__main__":

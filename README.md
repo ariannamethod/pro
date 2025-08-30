@@ -26,6 +26,8 @@ The morphology component caches word forms, providing efficient access to inflec
 
 The RAG layer retrieves related memories and joins them with current prompts for richer output.
 
+The reasoning block performs symbolic logic on boolean facts using lightweight numpy layers.
+
 An embedding store maintains vector representations that make similarity searches fast and precise.
 
 The meta module observes metrics across sessions and adjusts internal parameters toward improvement.

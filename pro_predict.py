@@ -13,6 +13,9 @@ import morphology
 
 from pro_metrics import tokenize, lowercase
 from pro_memory import DB_PATH
+import pro_memory
+
+TRANSFORMER_PATH = "pro_transformer.npz"
 
 _GRAPH: Dict[str, Counter] = {}
 _VECTORS: Dict[str, Dict[str, float]] = {}
@@ -247,6 +250,51 @@ class MiniSelfAttention:
         self.w_k = rng.standard_normal((dim, dim))
         self.w_v = rng.standard_normal((dim, dim))
         self.w_o = rng.standard_normal((dim, len(vocab)))
+        if os.path.exists(TRANSFORMER_PATH):
+            try:
+                data = np.load(TRANSFORMER_PATH, allow_pickle=True)
+                file_vocab = list(data["vocab"])
+                if file_vocab == vocab:
+                    self.emb = data["emb"]
+                    self.w_q = data["w_q"]
+                    self.w_k = data["w_k"]
+                    self.w_v = data["w_v"]
+                    self.w_o = data["w_o"]
+            except Exception:
+                pass
+
+    def save(self, path: str = TRANSFORMER_PATH) -> None:
+        np.savez(
+            path,
+            vocab=np.array(self.vocab),
+            emb=self.emb,
+            w_q=self.w_q,
+            w_k=self.w_k,
+            w_v=self.w_v,
+            w_o=self.w_o,
+        )
+
+    def train_step(self, tokens: List[str], target: str, lr: float = 0.1) -> None:
+        ids = [self.vocab.index(t) for t in tokens if t in self.vocab]
+        if not ids or target not in self.vocab:
+            return
+        x = self.emb[ids]
+        q = x @ self.w_q
+        k = x @ self.w_k
+        v = x @ self.w_v
+        scale = np.sqrt(self.dim)
+        att = q @ k.T / scale
+        att = np.exp(att - att.max(axis=-1, keepdims=True))
+        att = att / att.sum(axis=-1, keepdims=True)
+        context = att @ v
+        pooled = context.mean(axis=0)
+        out = pooled @ self.w_o
+        exp_out = np.exp(out - out.max())
+        probs = exp_out / exp_out.sum()
+        y = np.zeros(len(self.vocab))
+        y[self.vocab.index(target)] = 1.0
+        grad = probs - y
+        self.w_o -= lr * np.outer(pooled, grad)
 
     def logits(self, tokens: List[str]) -> Dict[str, float]:
         ids = [self.vocab.index(t) for t in tokens if t in self.vocab]
@@ -278,3 +326,26 @@ def transformer_logits(
         _TRANSFORMERS[key] = MiniSelfAttention(vocab)
     model = _TRANSFORMERS[key]
     return model.logits(tokens)
+
+
+async def update_transformer(
+    vocab: List[str],
+    messages: Optional[List[str]] = None,
+    responses: Optional[List[str]] = None,
+) -> None:
+    """Train the transformer using recent message/response pairs."""
+    if messages is None or responses is None:
+        messages, responses = await pro_memory.fetch_recent(20)
+    if not messages:
+        return
+    key = tuple(vocab)
+    if key not in _TRANSFORMERS:
+        _TRANSFORMERS[key] = MiniSelfAttention(vocab)
+    model = _TRANSFORMERS[key]
+    for msg, resp in zip(messages, responses):
+        tokens = lowercase(tokenize(msg))[-5:]
+        targets = lowercase(tokenize(resp))
+        if not targets:
+            continue
+        model.train_step(tokens, targets[0])
+    await asyncio.to_thread(model.save)

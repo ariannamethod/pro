@@ -294,10 +294,12 @@ class ProEngine:
         forbidden = {w.lower() for w in (forbidden or set())}
         analog_map: Dict[str, str] = {}
         for tok in forbidden:
-            suggestions = pro_predict.suggest(tok, topn=1)
+            suggestions = await asyncio.to_thread(
+                pro_predict.suggest, tok, topn=1
+            )
             analog = suggestions[0] if suggestions else None
             if not analog:
-                analog = pro_predict.lookup_analogs(tok)
+                analog = await asyncio.to_thread(pro_predict.lookup_analogs, tok)
             if analog:
                 analog_map[tok] = analog
         ordered_vocab: List[str] = []
@@ -323,7 +325,8 @@ class ProEngine:
         extra_idx = 0
         while True:
             # ----- First sentence -----
-            metrics = compute_metrics(
+            metrics = await asyncio.to_thread(
+                compute_metrics,
                 [w.lower() for w in attempt_seeds if w],
                 self.state.get("trigram_counts", {}),
                 self.state.get("bigram_counts", {}),
@@ -349,11 +352,14 @@ class ProEngine:
                 w for w, v in inv_scores.items() if v == max_inv and v > 0.0
             }
 
-            target_length = target_length_from_metrics(metrics)
+            target_length = await asyncio.to_thread(target_length_from_metrics, metrics)
             words: List[str] = []
             tracker: Set[str] = set()
             for w in attempt_seeds:
-                analog = pro_predict.lookup_analogs(w.lower()) or w
+                analog = (
+                    await asyncio.to_thread(pro_predict.lookup_analogs, w.lower())
+                    or w
+                )
                 if w.isupper():
                     analog = analog.upper()
                 elif w and w[0].isupper():
@@ -370,7 +376,7 @@ class ProEngine:
                 w = analog_map.get(lw, w)
                 combined_counts[w] = combined_counts.get(w, 0) + weight
             for w in high_inv_words:
-                analog = pro_predict.lookup_analogs(w)
+                analog = await asyncio.to_thread(pro_predict.lookup_analogs, w)
                 if analog:
                     combined_counts[analog] = (
                         combined_counts.get(analog, 0.0)
@@ -390,7 +396,8 @@ class ProEngine:
                     tracker.add(w)
             while len(words) < 2:
                 words.append("")
-            words = self.plan_sentence(
+            words = await asyncio.to_thread(
+                self.plan_sentence,
                 words,
                 target_length,
                 forbidden=forbidden,
@@ -443,14 +450,16 @@ class ProEngine:
                 )
             second_seeds = ordered2[:2]
 
-            metrics_first = compute_metrics(
+            metrics_first = await asyncio.to_thread(
+                compute_metrics,
                 first_words,
                 self.state.get("trigram_counts", {}),
                 self.state.get("bigram_counts", {}),
                 self.state.get("word_counts", {}),
                 self.state.get("char_ngram_counts", {}),
             )
-            target_length2 = target_length_from_metrics(
+            target_length2 = await asyncio.to_thread(
+                target_length_from_metrics,
                 {
                     "entropy": metrics_first["entropy"],
                     "perplexity": metrics_first["perplexity"],
@@ -458,7 +467,8 @@ class ProEngine:
                 min_len=5,
                 max_len=6,
             )
-            words2 = self.plan_sentence(
+            words2 = await asyncio.to_thread(
+                self.plan_sentence,
                 second_seeds + ordered,
                 target_length2,
                 forbidden=set(first_words) | forbidden,
@@ -512,7 +522,8 @@ class ProEngine:
         ]
         predicted: List[str] = []
         for w in unknown:
-            predicted.extend(pro_predict.suggest(w))
+            suggestions = await asyncio.to_thread(pro_predict.suggest, w)
+            predicted.extend(suggestions)
         # Blend n-gram prediction with transformer logits
         ngram_pred = ""
         if words:
@@ -522,7 +533,9 @@ class ProEngine:
         trans_pred = ""
         vocab = list(self.state.get("word_counts", {}).keys())
         if vocab:
-            logits = pro_predict.transformer_logits(words[-5:], vocab)
+            logits = await asyncio.to_thread(
+                pro_predict.transformer_logits, words[-5:], vocab
+            )
             trans_pred = max(logits, key=logits.get)
         blend: List[str] = []
         if ngram_pred:
@@ -541,7 +554,8 @@ class ProEngine:
             logging.error("Context retrieval failed: %s", exc)
         context_tokens = tokenize(' '.join(context))
         all_words = words + lowercase(context_tokens)
-        metrics = compute_metrics(
+        metrics = await asyncio.to_thread(
+            compute_metrics,
             all_words,
             self.state['trigram_counts'],
             self.state['bigram_counts'],
@@ -550,31 +564,52 @@ class ProEngine:
         )
         seed_words = original_words + context_tokens + predicted
         recent_msgs, recent_resps = await pro_memory.fetch_recent(50)
-        mem_tokens: List[str] = []
-        for text in recent_msgs + recent_resps:
-            mem_tokens.extend(lowercase(tokenize(text)))
-        data_tokens: List[str] = []
-        if os.path.exists("datasets"):
-            for name in os.listdir("datasets"):
-                path = os.path.join("datasets", name)
-                if not os.path.isfile(path):
-                    continue
-                try:
-                    with open(
-                        path, "r", encoding="utf-8", errors="ignore"
-                    ) as fh:
-                        for line in fh:
-                            data_tokens.extend(lowercase(tokenize(line)))
-                except Exception:  # pragma: no cover - safety
-                    continue
-        mem_counts = Counter(mem_tokens)
-        data_counts = Counter(data_tokens)
-        combined_vocab: Dict[str, int] = {}
-        for w in set(mem_counts) | set(data_counts):
-            weight = mem_counts.get(w, 0) + data_counts.get(w, 0)
-            if w in mem_counts and w in data_counts:
-                weight *= 2
-            combined_vocab[w] = weight
+
+        def _gather_tokens(texts: List[str]) -> List[str]:
+            tokens: List[str] = []
+            for text in texts:
+                tokens.extend(lowercase(tokenize(text)))
+            return tokens
+
+        mem_tokens = await asyncio.to_thread(
+            _gather_tokens, recent_msgs + recent_resps
+        )
+
+        def _load_data_tokens() -> List[str]:
+            tokens: List[str] = []
+            if os.path.exists("datasets"):
+                for name in os.listdir("datasets"):
+                    path = os.path.join("datasets", name)
+                    if not os.path.isfile(path):
+                        continue
+                    try:
+                        with open(
+                            path, "r", encoding="utf-8", errors="ignore"
+                        ) as fh:
+                            for line in fh:
+                                tokens.extend(lowercase(tokenize(line)))
+                    except Exception:  # pragma: no cover - safety
+                        continue
+            return tokens
+
+        data_tokens = await asyncio.to_thread(_load_data_tokens)
+
+        def _combine_vocab(
+            mem_tokens: List[str], data_tokens: List[str]
+        ) -> Dict[str, int]:
+            mem_counts = Counter(mem_tokens)
+            data_counts = Counter(data_tokens)
+            combined: Dict[str, int] = {}
+            for w in set(mem_counts) | set(data_counts):
+                weight = mem_counts.get(w, 0) + data_counts.get(w, 0)
+                if w in mem_counts and w in data_counts:
+                    weight *= 2
+                combined[w] = weight
+            return combined
+
+        combined_vocab = await asyncio.to_thread(
+            _combine_vocab, mem_tokens, data_tokens
+        )
         if self.chaos_factor:
             response = await self.respond(
                 seed_words,

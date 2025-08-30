@@ -11,7 +11,12 @@ STATE_PATH = 'pro_state.json'
 _SEP = '\u0001'
 
 
-def train(state: Dict, dataset_path: str) -> Dict:
+def train_weighted(state: Dict, dataset_path: str, weight: float) -> Dict:
+    if weight <= 0:
+        logging.warning(
+            "Non-positive weight %s for %s; skipping", weight, dataset_path
+        )
+        return state
     if not os.path.exists(dataset_path):
         logging.warning(
             "Dataset path %s does not exist; skipping training", dataset_path
@@ -25,8 +30,12 @@ def train(state: Dict, dataset_path: str) -> Dict:
         )
         return state
     words = lowercase(tokenize(text))
-    pro_sequence.analyze_sequences(state, words)
+    pro_sequence.analyze_sequences(state, words, weight=weight)
     return state
+
+
+def train(state: Dict, dataset_path: str) -> Dict:
+    return train_weighted(state, dataset_path, 1.0)
 
 
 def _serialize_state(state: Dict) -> Dict:

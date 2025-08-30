@@ -40,9 +40,9 @@ def test_process_message_resilience(monkeypatch):
 def test_async_tune_resilience(monkeypatch):
     engine = pro_engine.ProEngine()
 
-    def failing_train(state, path):
+    def failing_train(state, path, weight):
         raise RuntimeError("tune fail")
 
-    monkeypatch.setattr(pro_tune, "train", failing_train)
+    monkeypatch.setattr(pro_tune, "train_weighted", failing_train)
 
     asyncio.run(engine._async_tune(["dummy"]))

@@ -1,4 +1,5 @@
 import asyncio
+import json
 import logging
 import os
 import threading
@@ -38,18 +39,52 @@ def test_scan_triggers_tune_on_change(tmp_path, monkeypatch):
     assert called == [expected]
 
 
+def test_scan_triggers_tune_on_weight_change(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    datasets_dir = tmp_path / "datasets"
+    datasets_dir.mkdir()
+    data_file = datasets_dir / "sample.txt"
+    data_file.write_text("one")
+    weights_file = tmp_path / "dataset_weights.json"
+    weights_file.write_text(json.dumps({"sample.txt": 1}))
+
+    engine = ProEngine()
+    called = []
+
+    async def fake_async_tune(paths):
+        called.extend(paths)
+
+    monkeypatch.setattr(engine, "_async_tune", fake_async_tune)
+
+    async def run_scan():
+        await engine.scan_datasets()
+        await asyncio.sleep(0)
+
+    asyncio.run(run_scan())
+    expected = os.path.join("datasets", "sample.txt")
+    assert called == [expected]
+
+    called.clear()
+    weights_file.write_text(json.dumps({"sample.txt": 2}))
+    asyncio.run(run_scan())
+    assert called == [expected]
+
+
 def test_async_tune_logs_and_saves(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
     data_file = tmp_path / "sample.txt"
     data_file.write_text("data")
+    weights_file = tmp_path / "dataset_weights.json"
+    weights_file.write_text(json.dumps({"sample.txt": 2}))
 
     engine = ProEngine()
 
     trained = []
 
-    def fake_train(state, path):
-        trained.append(path)
+    def fake_train(state, path, weight):
+        trained.append((path, weight))
 
-    monkeypatch.setattr(pro_tune, "train", fake_train)
+    monkeypatch.setattr(pro_tune, "train_weighted", fake_train)
 
     saved = []
 
@@ -67,7 +102,7 @@ def test_async_tune_logs_and_saves(tmp_path, monkeypatch):
 
     asyncio.run(engine._async_tune([str(data_file)]))
 
-    assert trained == [str(data_file)]
+    assert trained == [(str(data_file), 2)]
     assert saved
     assert any("sample.txt" in entry for entry in logs)
 
@@ -87,7 +122,7 @@ def test_async_tune_runs_concurrently(tmp_path, monkeypatch):
     max_running = 0
     lock = threading.Lock()
 
-    def fake_train(state, path):
+    def fake_train(state, path, weight):
         nonlocal running, max_running
         with lock:
             running += 1
@@ -96,7 +131,7 @@ def test_async_tune_runs_concurrently(tmp_path, monkeypatch):
         with lock:
             running -= 1
 
-    monkeypatch.setattr(pro_tune, "train", fake_train)
+    monkeypatch.setattr(pro_tune, "train_weighted", fake_train)
 
     async def fake_save_state():
         pass

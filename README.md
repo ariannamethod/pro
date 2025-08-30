@@ -64,3 +64,29 @@ With modular design and measured feedback, the RE is positioned for rapid expans
 | Single Adapter  |       42.1 |                110 |
 | MoE (2 adapters)|       30.5 |                 90 |
 
+## Personal Fine-Tuning with LoRA
+
+LoRA adapters can be enabled by setting ``use_lora`` in the training
+configuration.  The snippet below demonstrates how to fine-tune and persist
+personal adapters:
+
+```python
+from autoadapt import LayerMutator, LoRALayer
+from trainer import Trainer
+
+trainer = Trainer(use_lora=True)
+layer = LoRALayer(
+    name="greeting",
+    rank=2,
+    alpha=1.0,
+    matrix_a=[[0.0, 0.0], [0.0, 0.0]],
+    matrix_b=[[0.0, 0.0], [0.0, 0.0]],
+)
+trainer.mutator.add_lora_layer(layer)
+trainer.mutator.save("checkpoints/my_lora")
+```
+
+Saved adapters can later be reloaded with
+``LayerMutator.load("checkpoints/my_lora")`` for continued training or
+inference.
+

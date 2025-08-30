@@ -149,6 +149,7 @@ class ProEngine:
                         "Initial training failed: %s", exc
                     )  # pragma: no cover - logging side effect
         await pro_memory.init_db()
+        await pro_memory.build_index()
         logging.basicConfig(
             filename=LOG_PATH, level=logging.INFO, format='%(message)s'
         )  # noqa: E501
@@ -740,6 +741,13 @@ class ProEngine:
         if trans_pred and trans_pred != ngram_pred:
             blend.append(trans_pred)
         predicted.extend(blend)
+        memory_context: List[str] = []
+        try:
+            memory_context = await pro_memory.fetch_similar_messages(
+                message, top_k=5
+            )
+        except Exception as exc:  # pragma: no cover - logging side effect
+            logging.error("Memory retrieval failed: %s", exc)
         try:
             await pro_memory.add_message(message)
         except Exception as exc:  # pragma: no cover - logging side effect
@@ -749,6 +757,7 @@ class ProEngine:
             context = await pro_rag.retrieve(words)
         except Exception as exc:  # pragma: no cover - logging side effect
             logging.error("Context retrieval failed: %s", exc)
+        context = memory_context + context
         context_tokens = tokenize(' '.join(context))
         all_words = words + lowercase(context_tokens)
         metrics = await asyncio.to_thread(

@@ -9,9 +9,58 @@ from pro_memory_pool import init_pool, close_pool, get_connection
 DB_PATH = 'pro_memory.db'
 
 
+_VECTORS: np.ndarray | None = None
+_MESSAGES: List[str] = []
+
+
 async def init_db() -> None:
     """Initialize database and connection pool."""
     await init_pool(DB_PATH)
+
+
+async def encode_message(content: str) -> np.ndarray:
+    """Encode text into an embedding vector using a transformer model."""
+    embedding = await pro_rag_embedding.embed_sentence(content)
+    return embedding.astype(np.float32)
+
+
+async def persist_embedding(content: str, embedding: np.ndarray) -> None:
+    """Persist a message and its embedding to the database."""
+    async with get_connection() as conn:
+        await asyncio.to_thread(
+            conn.execute,
+            'INSERT INTO messages(content, embedding) VALUES (?, ?)',
+            (content, embedding.tobytes()),
+        )
+        await asyncio.to_thread(conn.commit)
+
+
+def _add_to_index(content: str, embedding: np.ndarray) -> None:
+    """Add a vector to the in-memory search index."""
+    global _VECTORS
+    vec = embedding.reshape(1, -1)
+    if _VECTORS is None:
+        _VECTORS = vec
+    else:
+        _VECTORS = np.vstack([_VECTORS, vec])
+    _MESSAGES.append(content)
+
+
+async def build_index() -> None:
+    """Load all stored embeddings into the in-memory index."""
+    global _VECTORS, _MESSAGES
+    async with get_connection() as conn:
+        cur = await asyncio.to_thread(
+            conn.execute, 'SELECT content, embedding FROM messages'
+        )
+        rows = await asyncio.to_thread(cur.fetchall)
+    _MESSAGES = [r[0] for r in rows]
+    if rows:
+        _VECTORS = np.vstack(
+            [np.frombuffer(r[1], dtype=np.float32) for r in rows]
+        )
+    else:
+        _VECTORS = None
 
 
 async def close_db() -> None:
@@ -23,15 +72,10 @@ atexit.register(lambda: asyncio.run(close_db()))
 
 
 async def add_message(content: str) -> None:
-    """Store a message and its embedding asynchronously."""
-    embedding = await pro_rag_embedding.embed_sentence(content)
-    async with get_connection() as conn:
-        await asyncio.to_thread(
-            conn.execute,
-            'INSERT INTO messages(content, embedding) VALUES (?, ?)',
-            (content, embedding.tobytes()),
-        )
-        await asyncio.to_thread(conn.commit)
+    """Encode a message, persist it, and update the search index."""
+    embedding = await encode_message(content)
+    await persist_embedding(content, embedding)
+    _add_to_index(content, embedding)
 
 
 async def add_concept(description: str) -> None:
@@ -120,6 +164,22 @@ async def fetch_recent_messages(limit: int = 50) -> List[Tuple[str, np.ndarray]]
         (r[0], np.frombuffer(r[1], dtype=np.float32)) for r in rows
     ][::-1]
     return messages
+
+
+async def fetch_similar_messages(query: str, top_k: int = 5) -> List[str]:
+    """Return top-k stored messages most similar to the query."""
+    if _VECTORS is None or not _MESSAGES:
+        await build_index()
+    if _VECTORS is None or not _MESSAGES:
+        return []
+    q_vec = await encode_message(query)
+    vecs = _VECTORS
+    norms = np.linalg.norm(vecs, axis=1, keepdims=True) + 1e-10
+    vecs_norm = vecs / norms
+    q_norm = q_vec / (np.linalg.norm(q_vec) + 1e-10)
+    sims = vecs_norm @ q_norm
+    top = np.argsort(sims)[-top_k:][::-1]
+    return [_MESSAGES[i] for i in top]
 
 
 async def fetch_related_concepts(words: List[str]) -> List[str]:

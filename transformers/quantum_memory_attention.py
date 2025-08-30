@@ -19,13 +19,19 @@ class QuantumMemoryAttention:
     """
 
     def __init__(
-        self, retriever: ReinforceRetriever, backend: QuantumAttention | None = None
+        self,
+        retriever: ReinforceRetriever,
+        backend: QuantumAttention | None = None,
     ) -> None:
         self.retriever = retriever
         self.backend = backend or QuantumAttention()
 
     def compute_amplitudes(
-        self, query: np.ndarray, key: np.ndarray, dialogue_id: str, speaker: str
+        self,
+        query: np.ndarray,
+        key: np.ndarray,
+        dialogue_id: str,
+        speaker: str,
     ) -> np.ndarray:
         """Return amplitudes from keys and retrieved memory."""
 
@@ -41,7 +47,7 @@ class QuantumMemoryAttention:
         value: np.ndarray,
         dialogue_id: str,
         speaker: str,
-    ) -> np.ndarray:
+    ) -> tuple[np.ndarray, np.ndarray]:
         """Return attention output enriched with memory phases."""
 
         amp = self.compute_amplitudes(query, key, dialogue_id, speaker)

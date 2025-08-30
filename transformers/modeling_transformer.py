@@ -174,11 +174,13 @@ class QuantumHybridAttention:
 
     def _classical(
         self, query: np.ndarray, key: np.ndarray, value: np.ndarray
-    ) -> np.ndarray:
+    ) -> tuple[np.ndarray, np.ndarray]:
         scores = np.dot(query, key.T) / np.sqrt(key.shape[-1])
         weights = np.exp(scores)
         weights /= weights.sum(axis=-1, keepdims=True)
-        return weights @ value
+        out = weights @ value
+        betti = np.zeros((query.shape[0], 2), dtype=np.int64)
+        return out, betti
 
     def __call__(
         self,
@@ -186,18 +188,25 @@ class QuantumHybridAttention:
         key: np.ndarray,
         value: np.ndarray,
         features: np.ndarray,
-    ) -> np.ndarray:
+    ) -> tuple[np.ndarray, np.ndarray]:
         """Return attention outputs using a routing policy."""
         mask = self.router.route(features)
         out = np.zeros((query.shape[0], value.shape[-1]))
+        betti = np.zeros((query.shape[0], 2), dtype=np.int64)
         if (~mask).any():
-            out[~mask] = self._classical(query[~mask], key, value)
+            classical_out, _ = self._classical(query[~mask], key, value)
+            out[~mask] = classical_out
         if mask.any():
             for idx in np.where(mask)[0]:
-                out[idx] = self.quantum_backend.attention(
-                    query[idx], key, value
-                )
-        return out
+                result = self.quantum_backend.attention(query[idx], key, value)
+                if isinstance(result, tuple):
+                    q_out, b = result
+                else:  # Backends without betti features
+                    q_out, b = result, np.zeros(2, dtype=np.int64)
+                scale = 1.0 + b.sum()
+                out[idx] = q_out * scale
+                betti[idx] = b
+        return out, betti
 
 
 class QuantumMemoryLayer:
@@ -217,7 +226,7 @@ class QuantumMemoryLayer:
         value: np.ndarray,
         dialogue_id: str,
         speaker: str,
-    ) -> np.ndarray:
+    ) -> tuple[np.ndarray, np.ndarray]:
         return self.attention.attention(
             query, key, value, dialogue_id, speaker
         )

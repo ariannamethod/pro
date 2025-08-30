@@ -4,8 +4,10 @@ import sys
 
 # Allow imports from project root
 sys.path.append(str(pathlib.Path(__file__).resolve().parents[2]))
-from transformers.quantum_attention import QuantumAttention
-from transformers.quantum_memory_attention import QuantumMemoryAttention
+from transformers.quantum_attention import QuantumAttention  # noqa: E402
+from transformers.quantum_memory_attention import (  # noqa: E402
+    QuantumMemoryAttention,
+)
 
 
 def test_noise_robustness():
@@ -17,9 +19,11 @@ def test_noise_robustness():
     noisy = QuantumAttention(noise=0.2, seed=0)
     amp_clean = clean.compute_amplitudes(q, k)
     amp_noisy = noisy.compute_amplitudes(q, k)
-    res_clean = clean.measure(amp_clean, v)
-    res_noisy = noisy.measure(amp_noisy, v)
+    res_clean, betti_clean = clean.measure(amp_clean, v)
+    res_noisy, betti_noisy = noisy.measure(amp_noisy, v)
     assert np.allclose(res_clean, res_noisy, atol=0.2)
+    assert betti_clean.shape == (2,)
+    assert betti_noisy.shape == (2,)
 
 
 def test_superposition_learning():
@@ -29,9 +33,10 @@ def test_superposition_learning():
     v = np.eye(2)
     qa = QuantumAttention()
     amp = qa.compute_amplitudes(q, k)
-    res = qa.measure(amp, v)
+    res, betti = qa.measure(amp, v)
     expected = np.array([[0.5, 0.5]])
     assert np.allclose(res, expected, atol=0.1)
+    assert np.array_equal(betti, np.array([0, 0]))
 
 
 class _DummyRetriever:

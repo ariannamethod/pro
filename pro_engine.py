@@ -515,7 +515,7 @@ class ProEngine:
             tracker = set(first_words)
 
             # ----- Second sentence: choose semantically distant seeds -----
-            pro_predict._ensure_vectors()
+            await asyncio.to_thread(pro_predict._ensure_vectors)
             vectors = pro_predict._VECTORS
 
             def _cos(a: Dict[str, float], b: Dict[str, float]) -> float:

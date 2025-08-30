@@ -7,6 +7,7 @@ from typing import Dict, List, Optional
 import math
 import difflib
 import numpy as np
+import contextlib
 
 import morphology
 
@@ -16,6 +17,21 @@ from pro_memory import DB_PATH
 _GRAPH: Dict[str, Counter] = {}
 _VECTORS: Dict[str, Dict[str, float]] = {}
 _SYNONYMS: Dict[str, str] = {}
+_LOCK = asyncio.Lock()
+
+
+@contextlib.contextmanager
+def _vector_lock() -> None:
+    """Synchronise access to the shared embedding structures."""
+    need_lock = not _LOCK.locked()
+    if need_lock:
+        asyncio.run(_LOCK.acquire())
+    try:
+        yield
+    finally:
+        if need_lock:
+            _LOCK.release()
+
 
 if os.path.exists(DB_PATH):
     try:
@@ -84,19 +100,20 @@ def load_embeddings(
 
 def _ensure_vectors() -> None:
     global _GRAPH, _VECTORS
-    if _VECTORS:
-        return
-    try:
-        _GRAPH, _VECTORS = load_embeddings()
-        if not _VECTORS:
-            raise ValueError("empty embeddings")
-    except Exception:
-        _GRAPH = _build_graph()
-        _VECTORS = _build_embeddings(_GRAPH)
+    with _vector_lock():
+        if _VECTORS:
+            return
         try:
-            save_embeddings(_GRAPH, _VECTORS)
+            _GRAPH, _VECTORS = load_embeddings()
+            if not _VECTORS:
+                raise ValueError("empty embeddings")
         except Exception:
-            pass
+            _GRAPH = _build_graph()
+            _VECTORS = _build_embeddings(_GRAPH)
+            try:
+                save_embeddings(_GRAPH, _VECTORS)
+            except Exception:
+                pass
 
 
 async def update(word_list: List[str]) -> None:
@@ -106,17 +123,20 @@ async def update(word_list: List[str]) -> None:
     words become part of the internal vocabulary used by :func:`suggest`.
     """
     global _VECTORS
-    _ensure_vectors()
-    words = lowercase(word_list)
-    for i, word in enumerate(words):
-        for j in range(i + 1, len(words)):
-            other = words[j]
-            if not word or not other:
-                continue
-            _GRAPH.setdefault(word, Counter())[other] += 1
-            _GRAPH.setdefault(other, Counter())[word] += 1
-    _VECTORS = _build_embeddings(_GRAPH)
-    asyncio.create_task(asyncio.to_thread(save_embeddings, _GRAPH, _VECTORS))
+    async with _LOCK:
+        _ensure_vectors()
+        words = lowercase(word_list)
+        for i, word in enumerate(words):
+            for j in range(i + 1, len(words)):
+                other = words[j]
+                if not word or not other:
+                    continue
+                _GRAPH.setdefault(word, Counter())[other] += 1
+                _GRAPH.setdefault(other, Counter())[word] += 1
+        _VECTORS = _build_embeddings(_GRAPH)
+        asyncio.create_task(
+            asyncio.to_thread(save_embeddings, _GRAPH, _VECTORS)
+        )
 
 
 TOKENS_QUEUE: Optional[asyncio.Queue[List[str]]] = None
@@ -159,28 +179,29 @@ def suggest(word: str, topn: int = 3) -> List[str]:
     co-occurrence embedding space is used. For out-of-vocabulary words a
     fuzzy string match against the vocabulary is performed.
     """
-    _ensure_vectors()
-    if word not in _GRAPH and word not in _VECTORS:
-        return []
-    neighbours = _GRAPH.get(word)
-    if neighbours:
-        return [w for w, _ in neighbours.most_common(topn)]
-    vec = _VECTORS.get(word)
-    if not vec:
-        return []
-    scores: Dict[str, float] = {}
-    for other, ovec in _VECTORS.items():
-        if other == word:
-            continue
-        keys = set(vec) | set(ovec)
-        dot = sum(vec.get(k, 0.0) * ovec.get(k, 0.0) for k in keys)
-        norm_a = math.sqrt(sum(v * v for v in vec.values()))
-        norm_b = math.sqrt(sum(v * v for v in ovec.values()))
-        if norm_a == 0 or norm_b == 0:
-            continue
-        scores[other] = dot / (norm_a * norm_b)
-    ordered = sorted(scores.items(), key=lambda x: x[1], reverse=True)
-    return [w for w, _ in ordered[:topn]]
+    with _vector_lock():
+        _ensure_vectors()
+        if word not in _GRAPH and word not in _VECTORS:
+            return []
+        neighbours = _GRAPH.get(word)
+        if neighbours:
+            return [w for w, _ in neighbours.most_common(topn)]
+        vec = _VECTORS.get(word)
+        if not vec:
+            return []
+        scores: Dict[str, float] = {}
+        for other, ovec in _VECTORS.items():
+            if other == word:
+                continue
+            keys = set(vec) | set(ovec)
+            dot = sum(vec.get(k, 0.0) * ovec.get(k, 0.0) for k in keys)
+            norm_a = math.sqrt(sum(v * v for v in vec.values()))
+            norm_b = math.sqrt(sum(v * v for v in ovec.values()))
+            if norm_a == 0 or norm_b == 0:
+                continue
+            scores[other] = dot / (norm_a * norm_b)
+        ordered = sorted(scores.items(), key=lambda x: x[1], reverse=True)
+        return [w for w, _ in ordered[:topn]]
 
 
 def lookup_analogs(word: str) -> Optional[str]:
@@ -248,7 +269,9 @@ class MiniSelfAttention:
 _TRANSFORMERS: Dict[tuple, MiniSelfAttention] = {}
 
 
-def transformer_logits(tokens: List[str], vocab: List[str]) -> Dict[str, float]:
+def transformer_logits(
+    tokens: List[str], vocab: List[str]
+) -> Dict[str, float]:
     """Return next-word logits for *tokens* using a tiny transformer."""
     key = tuple(vocab)
     if key not in _TRANSFORMERS:

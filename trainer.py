@@ -5,6 +5,7 @@ import numpy as np
 from quantum_memory import QuantumMemory
 from transformers.time_fold import TimeFoldTransformer
 from pro_forecast import simulate_paths, backpropagate_forecast
+from resonance.p2p_resonance import P2PResonance
 
 
 class Trainer:
@@ -16,6 +17,9 @@ class Trainer:
         checkpoint_dir: str = "checkpoints/autoadapt",
         time_fold_steps: int = 1,
         use_lora: bool = False,
+        resonance_peer: P2PResonance | None = None,
+        sync_target: tuple[str, int] | None = None,
+        sync_interval: int = 10,
     ) -> None:
         self.eval_interval = eval_interval
         self.monitor = MetricMonitor()
@@ -25,12 +29,24 @@ class Trainer:
         self.step = 0
         self.checkpoint_dir = checkpoint_dir
         self.time_fold_steps = time_fold_steps
+        self.resonance_peer = resonance_peer
+        self.sync_target = sync_target
+        self.sync_interval = sync_interval
+        self.params = resonance_peer.params if resonance_peer else {}
 
     def train_step(self, layer: str, metric: float) -> None:
         """Simulate a training step and record metric for ``layer``."""
         forecast = simulate_paths([layer])
         backpropagate_forecast(forecast)
         self.monitor.record(metric)
+        if self.resonance_peer:
+            self.resonance_peer.queue_update({layer: metric})
+            if (
+                self.sync_target
+                and self.sync_interval > 0
+                and self.step % self.sync_interval == 0
+            ):
+                self.resonance_peer.exchange(*self.sync_target)
         if self.time_fold_steps > 1:
             self._gradient_echo(metric)
         self.step += 1

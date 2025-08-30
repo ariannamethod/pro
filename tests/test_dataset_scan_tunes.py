@@ -1,6 +1,10 @@
 import asyncio
 import logging
 import os
+import threading
+import time
+
+import pro_engine
 from pro_engine import ProEngine
 import pro_tune
 
@@ -66,3 +70,40 @@ def test_async_tune_logs_and_saves(tmp_path, monkeypatch):
     assert trained == [str(data_file)]
     assert saved
     assert any("sample.txt" in entry for entry in logs)
+
+
+def test_async_tune_runs_concurrently(tmp_path, monkeypatch):
+    monkeypatch.setattr(pro_engine, "TUNE_CONCURRENCY", 2)
+
+    data_files = []
+    for name in ["one.txt", "two.txt", "three.txt"]:
+        path = tmp_path / name
+        path.write_text("data")
+        data_files.append(str(path))
+
+    engine = ProEngine()
+
+    running = 0
+    max_running = 0
+    lock = threading.Lock()
+
+    def fake_train(state, path):
+        nonlocal running, max_running
+        with lock:
+            running += 1
+            max_running = max(max_running, running)
+        time.sleep(0.1)
+        with lock:
+            running -= 1
+
+    monkeypatch.setattr(pro_tune, "train", fake_train)
+
+    async def fake_save_state():
+        pass
+
+    monkeypatch.setattr(engine, "save_state", fake_save_state)
+
+    asyncio.run(engine._async_tune(data_files))
+
+    assert max_running > 1
+    assert max_running <= 2

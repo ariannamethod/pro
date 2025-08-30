@@ -31,6 +31,7 @@ from watchfiles import awatch
 STATE_PATH = 'pro_state.json'
 HASH_PATH = 'dataset_sha.json'
 LOG_PATH = 'pro.log'
+TUNE_CONCURRENCY = 4
 
 
 class ProEngine:
@@ -55,6 +56,7 @@ class ProEngine:
         self._tune_worker_task: Optional[asyncio.Task] = None
         self._watcher_task: Optional[asyncio.Task] = None
         self._tune_tasks: List[asyncio.Task] = []
+        self._tune_semaphore = asyncio.BoundedSemaphore(TUNE_CONCURRENCY)
 
     async def setup(self) -> None:
         pro_predict._GRAPH = {}
@@ -185,16 +187,16 @@ class ProEngine:
 
     async def _async_tune(self, paths: List[str]) -> None:
         tuned: List[str] = []
-        for path in paths:
-            try:
-                new_state = await asyncio.to_thread(
-                    pro_tune.train, self.state, path
-                )
-                if new_state is not None:
-                    self.state = new_state
-                tuned.append(os.path.basename(path))
-            except Exception as exc:  # pragma: no cover - logging side effect
-                logging.error("Tuning failed for %s: %s", path, exc)
+
+        async def tune_path(path: str) -> None:
+            async with self._tune_semaphore:
+                try:
+                    await asyncio.to_thread(pro_tune.train, self.state, path)
+                    tuned.append(os.path.basename(path))
+                except Exception as exc:  # pragma: no cover - logging side effect
+                    logging.error("Tuning failed for %s: %s", path, exc)
+
+        await asyncio.gather(*(tune_path(p) for p in paths))
         try:
             await self.save_state()
         except Exception as exc:  # pragma: no cover - logging side effect

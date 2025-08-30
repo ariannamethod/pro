@@ -70,7 +70,6 @@ def test_sqlite_connection_open_close(engine, monkeypatch):
     monkeypatch.setattr(sqlite3, "connect", tracking_connect)
 
     asyncio.run(engine.process_message("another message"))
-    # With a persistent aiosqlite connection, only one additional synchronous
-    # sqlite3 connection should be opened for the uniqueness check.
-    assert counts["connect"] == 1
-    assert counts["close"] == 1
+    # With a pooled sqlite connection, no new connections should be opened.
+    assert counts["connect"] == 0
+    assert counts["close"] == 0

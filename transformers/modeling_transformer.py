@@ -3,21 +3,74 @@
 This file introduces :class:`MemoryAttention`, a simple mechanism that
 injects information retrieved from a memory graph into a sequence of hidden
 states.  By default it works with :class:`~memory.memory_graph.GraphRetriever`
-but it can also consume a :class:`~memory.reinforce_retriever.ReinforceRetriever`
-whose probability distribution over nodes defines a soft cross-attention.
-The goal is not to implement a full Transformer model but to provide a
-lightweight hook where a memory graph can influence the computation.
+but it can also consume a
+:class:`~memory.reinforce_retriever.ReinforceRetriever` whose probability
+distribution over nodes defines a soft cross-attention.  The goal is not to
+implement a full Transformer model but to provide a lightweight hook where a
+memory graph can influence the computation.
 """
 
 from __future__ import annotations
 
-from typing import Union
+from typing import Callable, Optional, Union
+
+import ast
 
 import numpy as np
 import morphology
 
 from memory.memory_graph import GraphRetriever
 from memory.reinforce_retriever import ReinforceRetriever
+
+
+_kernel: Optional[Callable[[np.ndarray, np.ndarray], np.ndarray]] = None
+
+
+def register_kernel(fragment: Optional[str]) -> None:
+    """Register a custom kernel fragment.
+
+    The *fragment* must be a lambda expression of the form
+    ``lambda h, m: ...``.  Pass ``None`` to remove an existing kernel.
+    """
+
+    global _kernel
+    if fragment is None:
+        _kernel = None
+        return
+    _kernel = _sanitize(fragment)
+
+
+def _sanitize(fragment: str) -> Callable[[np.ndarray, np.ndarray], np.ndarray]:
+    """Return a callable from *fragment* with a restricted environment."""
+
+    tree = ast.parse(fragment, mode="eval")
+    if not isinstance(tree.body, ast.Lambda):
+        raise ValueError("Fragment must be a lambda expression")
+    args = tree.body.args
+    if [a.arg for a in args.args] != ["h", "m"]:
+        raise ValueError("Lambda must have arguments (h, m)")
+
+    allowed = (
+        ast.Expression,
+        ast.Lambda,
+        ast.arguments,
+        ast.arg,
+        ast.BinOp,
+        ast.Add,
+        ast.Sub,
+        ast.Mult,
+        ast.Div,
+        ast.Name,
+        ast.Load,
+        ast.Constant,
+    )
+    for node in ast.walk(tree):
+        if not isinstance(node, allowed):
+            raise ValueError("Disallowed syntax in fragment")
+        if isinstance(node, ast.Name) and node.id not in {"h", "m"}:
+            raise ValueError("Unknown identifier in fragment")
+
+    return eval(compile(tree, "<memory_kernel>", "eval"), {"__builtins__": {}})
 
 
 class MemoryAttention:
@@ -84,12 +137,16 @@ class MemoryAttention:
             mem_vec = self.retriever.retrieve(dialogue_id, speaker)
             if mem_vec is None:
                 return hidden_states
+            if _kernel is not None:
+                return _kernel(hidden_states, mem_vec)
             return hidden_states + mem_vec
 
         memory = self.retriever.last_message(dialogue_id, speaker)
         if not memory:
             return hidden_states
         mem_vec = self._encode(memory)
+        if _kernel is not None:
+            return _kernel(hidden_states, mem_vec)
         return hidden_states + mem_vec
 
 
@@ -100,7 +157,9 @@ class QuantumHybridAttention:
         self.router = router
         self.quantum_backend = quantum_backend
 
-    def _classical(self, query: np.ndarray, key: np.ndarray, value: np.ndarray) -> np.ndarray:
+    def _classical(
+        self, query: np.ndarray, key: np.ndarray, value: np.ndarray
+    ) -> np.ndarray:
         scores = np.dot(query, key.T) / np.sqrt(key.shape[-1])
         weights = np.exp(scores)
         weights /= weights.sum(axis=-1, keepdims=True)

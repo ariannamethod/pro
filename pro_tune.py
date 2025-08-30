@@ -2,10 +2,13 @@ import logging
 import json
 import argparse
 import os
+import asyncio
 from typing import Dict
 
 from pro_metrics import tokenize, lowercase
 import pro_sequence
+import pro_predict
+from pro_rag import retrieve_external
 
 STATE_PATH = 'pro_state.json'
 _SEP = '\u0001'
@@ -31,11 +34,30 @@ def train_weighted(state: Dict, dataset_path: str, weight: float) -> Dict:
         return state
     words = lowercase(tokenize(text))
     pro_sequence.analyze_sequences(state, words, weight=weight)
+    asyncio.run(pro_predict.update(words))
+    pro_predict.save_embeddings(pro_predict._GRAPH, pro_predict._VECTORS)
     return state
 
 
 def train(state: Dict, dataset_path: str) -> Dict:
     return train_weighted(state, dataset_path, 1.0)
+
+
+async def tune_with_knowledge(
+    state: Dict, query: str, source: str = "wikipedia", weight: float = 1.0
+) -> Dict:
+    """Retrieve external knowledge by *query* and fine-tune *state* on it."""
+    docs = await retrieve_external(query, source)
+    if not docs:
+        return state
+    text = " ".join(docs)
+    words = lowercase(tokenize(text))
+    pro_sequence.analyze_sequences(state, words, weight=weight)
+    await pro_predict.update(words)
+    await asyncio.to_thread(
+        pro_predict.save_embeddings, pro_predict._GRAPH, pro_predict._VECTORS
+    )
+    return state
 
 
 def _serialize_state(state: Dict) -> Dict:
@@ -79,10 +101,34 @@ if __name__ == '__main__':
     parser.add_argument(
         "--state-path", default=STATE_PATH, help="Path to state file"
     )
+    parser.add_argument(
+        "--knowledge-query",
+        help="Query string for external knowledge retrieval",
+    )
+    parser.add_argument(
+        "--knowledge-source",
+        default="wikipedia",
+        help="External knowledge source (default: wikipedia)",
+    )
+    parser.add_argument(
+        "--knowledge-weight",
+        type=float,
+        default=1.0,
+        help="Training weight for retrieved knowledge",
+    )
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.INFO)
     state = load_state(args.state_path)
     state = train(state, args.dataset_path)
+    if args.knowledge_query:
+        state = asyncio.run(
+            tune_with_knowledge(
+                state,
+                args.knowledge_query,
+                source=args.knowledge_source,
+                weight=args.knowledge_weight,
+            )
+        )
     save_state(state, args.state_path)
     logging.info("Training complete for %s", args.dataset_path)

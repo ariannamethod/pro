@@ -14,10 +14,12 @@ its state to disk via JSON serialization.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, field, asdict
 import json
 import os
 from typing import Dict, List, Optional
+
+from morphology import encode as encode_morph
 
 
 @dataclass
@@ -26,6 +28,7 @@ class MemoryNode:
 
     speaker: str
     text: str
+    morph_codes: List[float] = field(default_factory=list)
 
 
 class MemoryGraphStore:
@@ -40,7 +43,10 @@ class MemoryGraphStore:
     def add_utterance(self, dialogue_id: str, speaker: str, text: str) -> None:
         """Append an utterance to a dialogue and persist to disk."""
 
-        self.graph.setdefault(dialogue_id, []).append(MemoryNode(speaker, text))
+        codes = encode_morph(text).tolist()
+        self.graph.setdefault(dialogue_id, []).append(
+            MemoryNode(speaker, text, codes)
+        )
         if self.path:
             self.save(self.path)
 

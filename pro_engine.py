@@ -304,6 +304,25 @@ class ProEngine:
                 self.state.get("word_counts", {}),
                 self.state.get("char_ngram_counts", {}),
             )
+            bigram_inv = self.state.get("bigram_inv", {})
+            trigram_inv = self.state.get("trigram_inv", {})
+            inv_scores: Dict[str, float] = {}
+            for w in attempt_seeds:
+                lw = w.lower()
+                bi_val = max(
+                    (bigram_inv.get(p, {}).get(lw, 0.0) for p in bigram_inv),
+                    default=0.0,
+                )
+                tri_val = max(
+                    (trigram_inv.get(k, {}).get(lw, 0.0) for k in trigram_inv),
+                    default=0.0,
+                )
+                inv_scores[lw] = max(bi_val, tri_val)
+            max_inv = max(inv_scores.values(), default=0.0)
+            high_inv_words = {
+                w for w, v in inv_scores.items() if v == max_inv and v > 0.0
+            }
+
             target_length = target_length_from_metrics(metrics)
             words: List[str] = []
             tracker: Set[str] = set()
@@ -320,6 +339,16 @@ class ProEngine:
             combined_counts: Dict[str, float] = dict(word_counts)
             for w, weight in vocab.items():
                 combined_counts[w] = combined_counts.get(w, 0) + weight
+            for w in high_inv_words:
+                analog = pro_predict.lookup_analogs(w)
+                if analog:
+                    combined_counts[analog] = (
+                        combined_counts.get(analog, 0.0)
+                        + combined_counts.get(w, 0.0)
+                        + 1.0
+                    )
+                    combined_counts.pop(w, None)
+                    tracker.discard(w)
             ordered = sorted(
                 combined_counts, key=combined_counts.get, reverse=True
             )

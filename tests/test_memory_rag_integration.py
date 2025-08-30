@@ -27,8 +27,10 @@ def engine(monkeypatch):
 def test_calls_memory_and_rag(engine, monkeypatch):
     add_calls = []
     retrieve_calls = []
+    store_calls = []
     orig_add = pro_memory.add_message
     orig_retrieve = pro_rag.retrieve
+    orig_store = pro_memory.store_response
 
     async def wrapped_add_message(content):
         add_calls.append(content)
@@ -38,12 +40,18 @@ def test_calls_memory_and_rag(engine, monkeypatch):
         retrieve_calls.append(list(words))
         return await orig_retrieve(words, limit)
 
+    async def wrapped_store_response(content):
+        store_calls.append(content)
+        await orig_store(content)
+
     monkeypatch.setattr(pro_memory, "add_message", wrapped_add_message)
     monkeypatch.setattr(pro_rag, "retrieve", wrapped_retrieve)
+    monkeypatch.setattr(pro_memory, "store_response", wrapped_store_response)
 
     asyncio.run(engine.process_message("hello world"))
     assert len(add_calls) == 2
     assert len(retrieve_calls) == 1
+    assert len(store_calls) == 1
 
 
 def test_sqlite_connection_open_close(engine, monkeypatch):

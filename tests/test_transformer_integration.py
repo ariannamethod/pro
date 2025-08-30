@@ -5,6 +5,9 @@ import pro_engine
 import pro_memory
 import pro_predict
 import pro_rag
+import numpy as np
+
+from transformers.blocks.attention import wave_attention
 
 
 def test_mini_transformer_logits():
@@ -21,6 +24,7 @@ def test_process_message_blends_transformer(tmp_path, monkeypatch):
     engine.state["word_counts"] = {"hello": 1, "world": 1, "foo": 1, "baz": 1}
     engine.state["bigram_counts"] = {"world": {"foo": 1}}
     engine.state["trigram_counts"] = {("hello", "world"): {"foo": 1}}
+
     async def fake_retrieve(words):
         return []
 
@@ -90,3 +94,11 @@ def test_memory_attention_encodes_morphology():
     half = dim // 2
     assert np.allclose(morph_plain[:half], morph_pref[:half])
     assert not np.allclose(morph_plain[half:], morph_pref[half:])
+
+
+def test_wave_attention_returns_complex():
+    q = np.ones((1, 2), dtype=np.complex64)
+    k = np.ones((2, 2), dtype=np.complex64)
+    v = np.ones((2, 2), dtype=np.complex64)
+    out = wave_attention(q, k, v)
+    assert out.dtype == np.complex64

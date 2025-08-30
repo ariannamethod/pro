@@ -24,11 +24,11 @@ async def init_pool(db_path: str, size: int = 1) -> None:
         conn = _POOL[0]
         conn.execute(
             "CREATE TABLE IF NOT EXISTS messages("  # noqa: E501
-            "id INTEGER PRIMARY KEY AUTOINCREMENT, content TEXT, embedding BLOB)"
+            "id INTEGER PRIMARY KEY AUTOINCREMENT, content TEXT, embedding BLOB, tag TEXT)"
         )
         conn.execute(
             "CREATE TABLE IF NOT EXISTS responses("  # noqa: E501
-            "id INTEGER PRIMARY KEY AUTOINCREMENT, content TEXT)"
+            "id INTEGER PRIMARY KEY AUTOINCREMENT, content TEXT, tag TEXT)"
         )
         conn.execute(
             "CREATE TABLE IF NOT EXISTS concepts("  # noqa: E501
@@ -44,11 +44,16 @@ async def init_pool(db_path: str, size: int = 1) -> None:
             "CREATE TABLE IF NOT EXISTS adapter_usage("  # noqa: E501
             "adapter TEXT PRIMARY KEY, count INTEGER)"
         )
-        # Ensure embedding column exists for pre-existing databases
-        try:
-            conn.execute("ALTER TABLE messages ADD COLUMN embedding BLOB")
-        except sqlite3.OperationalError:
-            pass
+        # Ensure new columns exist for pre-existing databases
+        for stmt in [
+            "ALTER TABLE messages ADD COLUMN embedding BLOB",
+            "ALTER TABLE messages ADD COLUMN tag TEXT",
+            "ALTER TABLE responses ADD COLUMN tag TEXT",
+        ]:
+            try:
+                conn.execute(stmt)
+            except sqlite3.OperationalError:
+                pass
         conn.commit()
 
 

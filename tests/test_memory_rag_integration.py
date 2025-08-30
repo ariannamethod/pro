@@ -82,6 +82,7 @@ def test_sqlite_connection_open_close(engine, monkeypatch):
     assert counts["connect"] == 0
     assert counts["close"] == 0
 
+
 @pytest.mark.asyncio
 async def test_retrieve_vectors_and_word_overlap(engine):
     await pro_memory.add_message("measurement")
@@ -92,3 +93,18 @@ async def test_retrieve_vectors_and_word_overlap(engine):
 
     result = await pro_rag.retrieve(["zzyzx"])
     assert result == ["zzyzx"]
+
+
+@pytest.mark.asyncio
+async def test_store_if_novel_skips_duplicates(engine):
+    first = await pro_memory.store_if_novel("repeat twice")
+    second = await pro_memory.store_if_novel("repeat twice")
+
+    assert first is True
+    assert second is False
+
+    messages = await pro_memory.fetch_recent_messages()
+    assert [m for m, _ in messages].count("repeat twice") == 1
+
+    result = await pro_rag.retrieve(["repeat"])
+    assert result == ["repeat twice"]

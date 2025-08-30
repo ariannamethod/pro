@@ -64,3 +64,36 @@ class MemoryAttention:
             return hidden_states
         mem_vec = self._encode(memory)
         return hidden_states + mem_vec
+
+
+class QuantumHybridAttention:
+    """Route patches through classical or quantum attention backends."""
+
+    def __init__(self, router, quantum_backend) -> None:
+        self.router = router
+        self.quantum_backend = quantum_backend
+
+    def _classical(self, query: np.ndarray, key: np.ndarray, value: np.ndarray) -> np.ndarray:
+        scores = np.dot(query, key.T) / np.sqrt(key.shape[-1])
+        weights = np.exp(scores)
+        weights /= weights.sum(axis=-1, keepdims=True)
+        return weights @ value
+
+    def __call__(
+        self,
+        query: np.ndarray,
+        key: np.ndarray,
+        value: np.ndarray,
+        features: np.ndarray,
+    ) -> np.ndarray:
+        """Return attention outputs using a routing policy."""
+        mask = self.router.route(features)
+        out = np.zeros((query.shape[0], value.shape[-1]))
+        if (~mask).any():
+            out[~mask] = self._classical(query[~mask], key, value)
+        if mask.any():
+            for idx in np.where(mask)[0]:
+                out[idx] = self.quantum_backend.attention(
+                    query[idx], key, value
+                )
+        return out

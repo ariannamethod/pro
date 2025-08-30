@@ -46,3 +46,23 @@ def test_async_tune_resilience(monkeypatch):
     monkeypatch.setattr(pro_tune, "train_weighted", failing_train)
 
     asyncio.run(engine._async_tune(["dummy"]))
+
+
+def test_meta_controller_triggers_tuning(monkeypatch):
+    engine = pro_engine.ProEngine()
+    # avoid launching background worker
+    monkeypatch.setattr(engine, "_start_tune_worker", lambda: None)
+    mc = engine.meta_controller
+
+    for _ in range(mc.window):
+        asyncio.run(mc.update({"perplexity": 1.0}))
+
+    assert mc._baseline is not None
+
+    while not engine.dataset_queue.empty():
+        engine.dataset_queue.get_nowait()
+
+    for _ in range(mc.window):
+        asyncio.run(mc.update({"perplexity": 10.0}))
+
+    assert engine.dataset_queue.get_nowait() is None

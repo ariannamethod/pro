@@ -29,6 +29,7 @@ from pro_identity import swap_pronouns
 from watchfiles import awatch
 from transformers.blocks import SymbolicReasoner
 import meta_controller
+from api import vector_store
 
 STATE_PATH = 'pro_state.json'
 HASH_PATH = 'dataset_sha.json'
@@ -846,10 +847,21 @@ class ProEngine:
             memory_context = await pro_memory.fetch_similar_messages(
                 message, top_k=5
             )
+            try:
+                emb = await pro_memory.encode_message(message)
+                ext_hits = await vector_store.query(emb.tolist(), top_k=5)
+                memory_context.extend(ext_hits)
+            except Exception as exc:  # pragma: no cover - logging side effect
+                logging.error("External store query failed: %s", exc)
         except Exception as exc:  # pragma: no cover - logging side effect
             logging.error("Memory retrieval failed: %s", exc)
         try:
             await pro_memory.add_message(message)
+            try:
+                emb = await pro_memory.encode_message(message)
+                await vector_store.upsert(message, emb.tolist())
+            except Exception as exc:  # pragma: no cover - logging side effect
+                logging.error("External store upsert failed: %s", exc)
         except Exception as exc:  # pragma: no cover - logging side effect
             logging.error("Storing message failed: %s", exc)
         context: List[str] = []
@@ -952,6 +964,11 @@ class ProEngine:
             )
         try:
             await pro_memory.add_message(response)
+            try:
+                emb = await pro_memory.encode_message(response)
+                await vector_store.upsert(response, emb.tolist())
+            except Exception as exc:  # pragma: no cover - logging side effect
+                logging.error("External store upsert failed: %s", exc)
         except Exception as exc:  # pragma: no cover - logging side effect
             logging.error("Storing response failed: %s", exc)
         dataset_path = os.path.join('datasets', 'conversation.log')

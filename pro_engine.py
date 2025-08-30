@@ -21,6 +21,7 @@ import pro_memory
 import pro_rag
 import pro_predict
 from pro_identity import swap_pronouns
+from watchfiles import awatch
 
 STATE_PATH = 'pro_state.json'
 HASH_PATH = 'dataset_sha.json'
@@ -103,8 +104,17 @@ class ProEngine:
         logging.basicConfig(
             filename=LOG_PATH, level=logging.INFO, format='%(message)s'
         )  # noqa: E501
+        os.makedirs('datasets', exist_ok=True)
         await self.scan_datasets()
-        asyncio.create_task(self._dataset_watcher())
+
+        async def _watch_datasets() -> None:
+            async for _ in awatch('datasets'):
+                try:
+                    await self.scan_datasets()
+                except Exception as exc:  # pragma: no cover - logging side effect
+                    logging.error("Dataset scan failed: %s", exc)
+
+        asyncio.create_task(_watch_datasets())
 
     async def save_state(self) -> None:
         await asyncio.to_thread(pro_tune.save_state, self.state, STATE_PATH)
@@ -161,13 +171,6 @@ class ProEngine:
         if tuned:
             logging.info("Tuned datasets: %s", ", ".join(tuned))
 
-    async def _dataset_watcher(self) -> None:
-        while True:
-            try:
-                await self.scan_datasets()
-            except Exception as exc:  # pragma: no cover - logging side effect
-                logging.error("Dataset scan failed: %s", exc)
-            await asyncio.sleep(60)
 
     def compute_charged_words(self, words: List[str]) -> List[str]:
         word_counts = Counter(words)

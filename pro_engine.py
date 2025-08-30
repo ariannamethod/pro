@@ -250,6 +250,13 @@ class ProEngine:
                     ]
                 for cand in ordered[: beam_width * 2]:
                     lw = cand.lower()
+                    if seq:
+                        prev_lw = seq[-1].lower()
+                        if (
+                            (prev_lw == "a" and lw in {"you", "i"})
+                            or (lw == "a" and prev_lw in {"you", "i"})
+                        ):
+                            continue
                     if lw in used:
                         continue
                     new_seq = seq + [cand]

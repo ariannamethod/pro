@@ -61,3 +61,32 @@ def test_logits_shift_after_training(tmp_path, monkeypatch):
     asyncio.run(pro_predict.update_transformer(vocab))
     after = pro_predict.transformer_logits(["hello", "world"], vocab)["foo"]
     assert after != before
+
+
+def test_memory_attention_encodes_morphology():
+    from transformers.modeling_transformer import MemoryAttention
+    import numpy as np
+
+    class DummyRetriever:
+        pass
+
+    dim = 16
+    attn = MemoryAttention(DummyRetriever(), dim=dim)
+
+    def base_encode(text: str) -> np.ndarray:
+        vec = np.zeros(dim, dtype=np.float32)
+        for i, b in enumerate(text.encode("utf-8")):
+            if i >= dim:
+                break
+            vec[i] = b / 255.0
+        return vec
+
+    word_plain = "делать"
+    word_pref = "подделать"
+    vec_plain = attn._encode(word_plain)
+    vec_pref = attn._encode(word_pref)
+    morph_plain = vec_plain - base_encode(word_plain)
+    morph_pref = vec_pref - base_encode(word_pref)
+    half = dim // 2
+    assert np.allclose(morph_plain[:half], morph_pref[:half])
+    assert not np.allclose(morph_plain[half:], morph_pref[half:])

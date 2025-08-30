@@ -117,6 +117,39 @@ async def update(word_list: List[str]) -> None:
     asyncio.create_task(asyncio.to_thread(save_embeddings, _GRAPH, _VECTORS))
 
 
+TOKENS_QUEUE: Optional[asyncio.Queue[List[str]]] = None
+_QUEUE_LOOP: Optional[asyncio.AbstractEventLoop] = None
+_UPDATE_TASK: Optional[asyncio.Task] = None
+
+
+async def _update_worker() -> None:
+    """Background task that flushes queued tokens in batches."""
+    batch: List[str] = []
+    while True:
+        assert TOKENS_QUEUE is not None
+        items = await TOKENS_QUEUE.get()
+        batch.extend(items)
+        TOKENS_QUEUE.task_done()
+        # Drain any other pending items without waiting
+        while not TOKENS_QUEUE.empty():
+            more = await TOKENS_QUEUE.get()
+            batch.extend(more)
+            TOKENS_QUEUE.task_done()
+        await update(batch)
+        batch.clear()
+
+
+async def enqueue_tokens(tokens: List[str]) -> None:
+    """Add *tokens* to the update queue and ensure the worker runs."""
+    global TOKENS_QUEUE, _QUEUE_LOOP, _UPDATE_TASK
+    loop = asyncio.get_running_loop()
+    if TOKENS_QUEUE is None or _QUEUE_LOOP is not loop:
+        TOKENS_QUEUE = asyncio.Queue()
+        _QUEUE_LOOP = loop
+        _UPDATE_TASK = loop.create_task(_update_worker())
+    await TOKENS_QUEUE.put(tokens)
+
+
 def suggest(word: str, topn: int = 3) -> List[str]:
     """Return up to *topn* words semantically close to *word*.
 
@@ -125,25 +158,27 @@ def suggest(word: str, topn: int = 3) -> List[str]:
     fuzzy string match against the vocabulary is performed.
     """
     _ensure_vectors()
+    if word not in _GRAPH and word not in _VECTORS:
+        return []
     neighbours = _GRAPH.get(word)
     if neighbours:
         return [w for w, _ in neighbours.most_common(topn)]
-    if word in _VECTORS:
-        vec = _VECTORS[word]
-        scores: Dict[str, float] = {}
-        for other, ovec in _VECTORS.items():
-            if other == word:
-                continue
-            keys = set(vec) | set(ovec)
-            dot = sum(vec.get(k, 0.0) * ovec.get(k, 0.0) for k in keys)
-            norm_a = math.sqrt(sum(v * v for v in vec.values()))
-            norm_b = math.sqrt(sum(v * v for v in ovec.values()))
-            if norm_a == 0 or norm_b == 0:
-                continue
-            scores[other] = dot / (norm_a * norm_b)
-        ordered = sorted(scores.items(), key=lambda x: x[1], reverse=True)
-        return [w for w, _ in ordered[:topn]]
-    return []
+    vec = _VECTORS.get(word)
+    if not vec:
+        return []
+    scores: Dict[str, float] = {}
+    for other, ovec in _VECTORS.items():
+        if other == word:
+            continue
+        keys = set(vec) | set(ovec)
+        dot = sum(vec.get(k, 0.0) * ovec.get(k, 0.0) for k in keys)
+        norm_a = math.sqrt(sum(v * v for v in vec.values()))
+        norm_b = math.sqrt(sum(v * v for v in ovec.values()))
+        if norm_a == 0 or norm_b == 0:
+            continue
+        scores[other] = dot / (norm_a * norm_b)
+    ordered = sorted(scores.items(), key=lambda x: x[1], reverse=True)
+    return [w for w, _ in ordered[:topn]]
 
 
 def lookup_analogs(word: str) -> Optional[str]:

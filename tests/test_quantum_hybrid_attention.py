@@ -13,5 +13,7 @@ def test_quantum_hybrid_attention_routes():
     k = np.ones((3, 2))
     v = np.ones((3, 2))
     features = np.ones((3, 1))
-    out = attention(q, k, v, features)
+    out, betti = attention(q, k, v, features)
     assert out.shape == (3, 2)
+    assert betti.shape == (3, 2)
+    assert np.all(betti == 0)

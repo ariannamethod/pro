@@ -568,7 +568,7 @@ class ProEngine:
             )
             words2 = await asyncio.to_thread(
                 self.plan_sentence,
-                second_seeds + ordered,
+                second_seeds,
                 target_length2,
                 forbidden=set(first_words) | forbidden,
                 chaos_factor=cf,

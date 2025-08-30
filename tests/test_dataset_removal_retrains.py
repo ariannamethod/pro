@@ -16,22 +16,21 @@ def test_retrain_triggered_on_dataset_file_removal(tmp_path, monkeypatch):
     data_file.write_text("data")
 
     engine = ProEngine()
-
     calls = []
 
-    def fake_create_task(coro):
-        calls.append(coro)
-        coro.close()
-        loop = asyncio.get_running_loop()
-        return loop.create_task(asyncio.sleep(0))
+    async def fake_async_tune(paths):
+        calls.append(paths)
 
-    monkeypatch.setattr(asyncio, "create_task", fake_create_task)
+    monkeypatch.setattr(engine, "_async_tune", fake_async_tune)
 
-    asyncio.run(engine.scan_datasets())
+    async def run_scan():
+        await engine.scan_datasets()
+        await asyncio.sleep(0)
+
+    asyncio.run(run_scan())
     calls.clear()
 
     data_file.unlink()
 
-    asyncio.run(engine.scan_datasets())
-    assert len(calls) == 1
-
+    asyncio.run(run_scan())
+    assert calls == [[]]

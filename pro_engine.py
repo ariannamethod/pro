@@ -51,6 +51,8 @@ class ProEngine:
         self.similarity_threshold = similarity_threshold
         self.candidate_buffer: deque = deque(maxlen=20)
         self.last_forecast: Optional[Dict] = None
+        self.dataset_queue: asyncio.Queue[Optional[str]] = asyncio.Queue()
+        self._tune_worker_task: Optional[asyncio.Task] = None
 
     async def setup(self) -> None:
         pro_predict._GRAPH = {}
@@ -123,10 +125,29 @@ class ProEngine:
 
         asyncio.create_task(_watch_datasets())
 
+    def _start_tune_worker(self) -> None:
+        if self._tune_worker_task is None or self._tune_worker_task.done():
+            self._tune_worker_task = asyncio.create_task(self._tune_worker())
+
+    async def _tune_worker(self) -> None:
+        try:
+            while True:
+                path = await self.dataset_queue.get()
+                try:
+                    if path is None:
+                        await self._async_tune([])
+                    else:
+                        await self._async_tune([path])
+                finally:
+                    self.dataset_queue.task_done()
+        except asyncio.CancelledError:  # pragma: no cover - worker shutdown
+            pass
+
     async def save_state(self) -> None:
         await asyncio.to_thread(pro_tune.save_state, self.state, STATE_PATH)
 
     async def scan_datasets(self) -> None:
+        self._start_tune_worker()
         if not os.path.exists('datasets'):
             return
         old_hashes: Dict[str, str] = {}
@@ -148,7 +169,7 @@ class ProEngine:
         if removed and not new_hashes:
             with open(HASH_PATH, 'w', encoding='utf-8') as fh:
                 json.dump(new_hashes, fh)
-            asyncio.create_task(self._async_tune([]))
+            await self.dataset_queue.put(None)
             return
         if removed:
             changed_files = [
@@ -156,8 +177,8 @@ class ProEngine:
             ]
         with open(HASH_PATH, 'w', encoding='utf-8') as fh:
             json.dump(new_hashes, fh)
-        if changed_files:
-            asyncio.create_task(self._async_tune(changed_files))
+        for path in changed_files:
+            await self.dataset_queue.put(path)
 
     async def _async_tune(self, paths: List[str]) -> None:
         tuned: List[str] = []
@@ -177,7 +198,6 @@ class ProEngine:
             logging.error("Saving state failed after tuning: %s", exc)
         if tuned:
             logging.info("Tuned datasets: %s", ", ".join(tuned))
-
 
     def compute_charged_words(self, words: List[str]) -> List[str]:
         word_counts = Counter(words)

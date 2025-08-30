@@ -95,6 +95,7 @@ class ProEngine:
         chaos_factor: float = 0.0,
         similarity_threshold: float = 0.3,
         saliency_threshold: float = 0.0,
+        max_window: int = 50,
     ) -> None:
         self.state: Dict = {
             'word_counts': {},
@@ -109,6 +110,7 @@ class ProEngine:
         self.chaos_factor = chaos_factor
         self.similarity_threshold = similarity_threshold
         self.saliency_threshold = saliency_threshold
+        self.max_window = max_window
         self.candidate_buffer: deque = deque(maxlen=20)
         self.last_forecast: Optional[Dict] = None
         self.dataset_queue: asyncio.Queue[Optional[str]] = asyncio.Queue()
@@ -122,6 +124,11 @@ class ProEngine:
         self.meta_controller = MetaController(self)
         self.arch_controller = meta_controller.MetaController()
         self.layer_config: Dict[str, int] = {}
+
+        try:
+            pro_predict.set_max_window(max_window)
+        except Exception:
+            pass
 
     def _load_adapters(self) -> Dict[str, Dict]:
         pool: Dict[str, Dict] = {}
@@ -1073,13 +1080,17 @@ class ProEngine:
             self._tune_tasks.append(task)
         except Exception as exc:  # pragma: no cover - logging side effect
             logging.error("Logging conversation failed: %s", exc)
+        msg_window = min(self.max_window, len(words))
         await asyncio.to_thread(
-            pro_sequence.analyze_sequences, self.state, words
+            pro_sequence.analyze_sequences, self.state, words, window_size=msg_window
         )
+        resp_tokens = lowercase(tokenize(response))
+        resp_window = min(self.max_window, len(resp_tokens))
         await asyncio.to_thread(
             pro_sequence.analyze_sequences,
             self.state,
-            lowercase(tokenize(response)),
+            resp_tokens,
+            window_size=resp_window,
         )
         await pro_predict.enqueue_tokens(
             words + lowercase(tokenize(response))
@@ -1159,7 +1170,16 @@ if __name__ == '__main__':
         default=0.0,
         help="Percentile for dropping low-importance tokens before attention",
     )
+    parser.add_argument(
+        "--max-window",
+        type=int,
+        default=50,
+        help="Maximum token window for sequence analysis",
+    )
     args = parser.parse_args()
     asyncio.run(
-        ProEngine(saliency_threshold=args.saliency_threshold).interact()
+        ProEngine(
+            saliency_threshold=args.saliency_threshold,
+            max_window=args.max_window,
+        ).interact()
     )

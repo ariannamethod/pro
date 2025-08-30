@@ -1,10 +1,20 @@
-from typing import Dict, List, Tuple
+from typing import Dict, List, Tuple, Optional
 
 
 def analyze_sequences(
-    state: Dict, words: List[str], char_n: int = 3, weight: float = 1.0
+    state: Dict,
+    words: List[str],
+    char_n: int = 3,
+    weight: float = 1.0,
+    window_size: Optional[int] = None,
 ) -> None:
-    """Update state with word, bigram, trigram and char-level n-gram counts."""
+    """Update state with n-gram counts within a recent context window.
+
+    Only the last *window_size* tokens of *words* are considered when
+    updating counts. If *window_size* is ``None`` all tokens are used.
+    """
+    if window_size:
+        words = words[-window_size:]
     wc = state.setdefault('word_counts', {})
     bc = state.setdefault('bigram_counts', {})
     tc = state.setdefault('trigram_counts', {})

@@ -16,12 +16,15 @@ from transformers.blocks import DynamicContextGate
 from pro_metrics import tokenize, lowercase
 from pro_memory import DB_PATH
 import pro_memory
+import pro_sequence
 
 TRANSFORMER_PATH = "pro_transformer.npz"
 
 _GRAPH: Dict[str, Counter] = {}
 _VECTORS: Dict[str, Dict[str, float]] = {}
 _SYNONYMS: Dict[str, str] = {}
+_SEQ_STATE: Dict = {}
+MAX_WINDOW = 50
 _LOCK = threading.RLock()
 
 
@@ -128,6 +131,8 @@ async def update(word_list: List[str]) -> None:
     with _vector_lock():
         _ensure_vectors()
         words = lowercase(word_list)
+        window = min(MAX_WINDOW, max(1, len(words) // 2))
+        pro_sequence.analyze_sequences(_SEQ_STATE, words, window_size=window)
         for i, word in enumerate(words):
             for j in range(i + 1, len(words)):
                 other = words[j]
@@ -172,6 +177,12 @@ async def enqueue_tokens(tokens: List[str]) -> None:
         _QUEUE_LOOP = loop
         _UPDATE_TASK = loop.create_task(_update_worker())
     await TOKENS_QUEUE.put(tokens)
+
+
+def set_max_window(size: int) -> None:
+    """Set the maximum window size for sequence analysis."""
+    global MAX_WINDOW
+    MAX_WINDOW = size
 
 
 def suggest(word: str, topn: int = 3) -> List[str]:

@@ -84,7 +84,10 @@ class MetaController:
 
 class ProEngine:
     def __init__(
-        self, chaos_factor: float = 0.0, similarity_threshold: float = 0.3
+        self,
+        chaos_factor: float = 0.0,
+        similarity_threshold: float = 0.3,
+        saliency_threshold: float = 0.0,
     ) -> None:
         self.state: Dict = {
             'word_counts': {},
@@ -98,6 +101,7 @@ class ProEngine:
         }
         self.chaos_factor = chaos_factor
         self.similarity_threshold = similarity_threshold
+        self.saliency_threshold = saliency_threshold
         self.candidate_buffer: deque = deque(maxlen=20)
         self.last_forecast: Optional[Dict] = None
         self.dataset_queue: asyncio.Queue[Optional[str]] = asyncio.Queue()
@@ -144,6 +148,31 @@ class ProEngine:
                 scores.append((score, name))
         scores.sort(reverse=True)
         return [self.adapter_pool[n]["weights"] for _, n in scores[:top_k]]
+
+    # Saliency helpers -------------------------------------------------
+
+    def score_tokens(self, tokens: List[str]) -> List[float]:
+        """Return an importance score for each token.
+
+        Tokens are scored using inverse word frequency from the current
+        engine state. Unknown tokens receive a default score of ``1.0``.
+        """
+
+        counts = self.state.get("word_counts", {})
+        scores: List[float] = []
+        for tok in tokens:
+            c = counts.get(tok.lower(), 0)
+            scores.append(1.0 / c if c > 0 else 1.0)
+        return scores
+
+    def _drop_low_saliency(self, tokens: List[str]) -> List[str]:
+        """Filter out tokens below the configured saliency percentile."""
+
+        if self.saliency_threshold <= 0.0 or not tokens:
+            return tokens
+        scores = self.score_tokens(tokens)
+        cutoff = float(np.percentile(scores, self.saliency_threshold))
+        return [tok for tok, score in zip(tokens, scores) if score >= cutoff]
 
     def _apply_layer_config(self, cfg: Dict[str, int]) -> None:
         """Apply the selected layer configuration to the reasoner."""
@@ -801,8 +830,9 @@ class ProEngine:
         trans_pred = ""
         vocab = list(self.state.get("word_counts", {}).keys())
         if vocab:
+            att_tokens = self._drop_low_saliency(words[-5:])
             logits = await asyncio.to_thread(
-                pro_predict.transformer_logits, words[-5:], vocab, adapters
+                pro_predict.transformer_logits, att_tokens, vocab, adapters
             )
             trans_pred = max(logits, key=logits.get)
         blend: List[str] = []
@@ -1022,4 +1052,16 @@ class ProEngine:
 
 
 if __name__ == '__main__':
-    asyncio.run(ProEngine().interact())
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Run the ProEngine chatbot")
+    parser.add_argument(
+        "--saliency-threshold",
+        type=float,
+        default=0.0,
+        help="Percentile for dropping low-importance tokens before attention",
+    )
+    args = parser.parse_args()
+    asyncio.run(
+        ProEngine(saliency_threshold=args.saliency_threshold).interact()
+    )

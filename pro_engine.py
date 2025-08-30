@@ -434,6 +434,25 @@ class ProEngine:
                 first2 = first2[0].upper() + first2[1:]
             words2[0] = first2
             sentence2 = " ".join(filter(None, words2[:target_length2])) + "."
+            last1 = sentence1.rstrip(".").split()[-1].lower()
+            if last1 in {"the", "a"}:
+                replacement = next(
+                    (w for w in ordered if w.lower() not in {"the", "a"}),
+                    last1,
+                )
+                parts = sentence1.rstrip(".").split()
+                parts[-1] = replacement
+                sentence1 = " ".join(parts) + "."
+
+            last2 = sentence2.rstrip(".").split()[-1].lower()
+            if last2 in {"the", "a"}:
+                replacement2 = next(
+                    (w for w in ordered2 if w.lower() not in {"the", "a"}),
+                    last2,
+                )
+                parts2 = sentence2.rstrip(".").split()
+                parts2[-1] = replacement2
+                sentence2 = " ".join(parts2) + "."
 
             response = sentence1 + " " + sentence2
             if pro_memory.is_unique(response):

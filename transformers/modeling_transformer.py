@@ -75,6 +75,18 @@ def _sanitize(fragment: str) -> Callable[[np.ndarray, np.ndarray], np.ndarray]:
     return eval(compile(tree, "<memory_kernel>", "eval"), {"__builtins__": {}})
 
 
+class ResonantAdapter:
+    """Generate a sinusoidal adapter vector."""
+
+    def __init__(self, frequency: float, amplitude: float) -> None:
+        self.frequency = frequency
+        self.amplitude = amplitude
+
+    def __call__(self, dim: int) -> np.ndarray:
+        idx = np.arange(dim, dtype=np.float32)
+        return self.amplitude * np.sin(self.frequency * idx)
+
+
 class MemoryAttention:
     """Additively combines hidden states with retrieved memory vectors.
 
@@ -134,22 +146,23 @@ class MemoryAttention:
         self, hidden_states: np.ndarray, dialogue_id: str, speaker: str
     ) -> np.ndarray:
         """Return ``hidden_states`` enriched with memory from the graph."""
+        adapter_vec = ResonantAdapter(1.0, 0.1)(hidden_states.shape[-1])
 
         if hasattr(self.retriever, "retrieve"):
             mem_vec = self.retriever.retrieve(dialogue_id, speaker)
             if mem_vec is None:
-                return hidden_states
+                return hidden_states + adapter_vec
             if _kernel is not None:
-                return _kernel(hidden_states, mem_vec)
-            return hidden_states + mem_vec
+                return _kernel(hidden_states, mem_vec) + adapter_vec
+            return hidden_states + mem_vec + adapter_vec
 
         memory = self.retriever.last_message(dialogue_id, speaker)
         if not memory:
-            return hidden_states
+            return hidden_states + adapter_vec
         mem_vec = self._encode(memory)
         if _kernel is not None:
-            return _kernel(hidden_states, mem_vec)
-        return hidden_states + mem_vec
+            return _kernel(hidden_states, mem_vec) + adapter_vec
+        return hidden_states + mem_vec + adapter_vec
 
 
 class QuantumHybridAttention:
@@ -191,7 +204,9 @@ class QuantumMemoryLayer:
     """Integrate retrieved memory into a quantum attention step."""
 
     def __init__(
-        self, retriever: ReinforceRetriever, backend: QuantumAttention | None = None
+        self,
+        retriever: ReinforceRetriever,
+        backend: QuantumAttention | None = None,
     ) -> None:
         self.attention = QuantumMemoryAttention(retriever, backend)
 
@@ -203,4 +218,6 @@ class QuantumMemoryLayer:
         dialogue_id: str,
         speaker: str,
     ) -> np.ndarray:
-        return self.attention.attention(query, key, value, dialogue_id, speaker)
+        return self.attention.attention(
+            query, key, value, dialogue_id, speaker
+        )

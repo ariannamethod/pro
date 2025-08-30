@@ -9,6 +9,10 @@ ARTICLE_PAIR_RE = re.compile(r"\b(the|a|an) (the|a|an)\b", re.IGNORECASE)
 A_PREP_RE = re.compile(r"\ba (in|on|to|by|at|of)\b(?! \w)", re.IGNORECASE)
 DUP_WORD_RE = re.compile(r"\b(\w+)\b \1\b", re.IGNORECASE)
 SINGLE_LETTER_PAIR_RE = re.compile(r"\b\w\b \b\w\b")
+MID_SENTENCE_CAP_THE_RE = re.compile(r"(?<!^)(?<![.!?]\s)The\b")
+ARTICLE_PRONOUN_RE = re.compile(
+    r"\b(the|a)\s+(he|she|they|it)\b", re.IGNORECASE
+)
 
 DUP_WHITELIST = {"go", "no", "yeah"}
 VERB_SET = {
@@ -63,6 +67,10 @@ def passes_filters(text: str) -> bool:
         return False
     if A_PREP_RE.search(text):
         return False
+    if MID_SENTENCE_CAP_THE_RE.search(text):
+        return False
+    if ARTICLE_PRONOUN_RE.search(text):
+        return False
     for m in DUP_WORD_RE.finditer(text):
         word = m.group(1).lower()
         if word in DUP_WHITELIST:
@@ -76,7 +84,10 @@ def passes_filters(text: str) -> bool:
             continue
         return False
     if SENTENCE_END_PREP_RE.search(text):
-        _log("ending-preposition", SENTENCE_END_PREP_RE.search(text).group(0).split())
+        _log(
+            "ending-preposition",
+            SENTENCE_END_PREP_RE.search(text).group(0).split(),
+        )
     if TO_SEQ_RE.search(text):
         _log("to-sequence", TO_SEQ_RE.search(text).group(0).split())
     return True

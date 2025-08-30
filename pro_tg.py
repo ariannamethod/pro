@@ -1,9 +1,9 @@
 """Simple asynchronous Telegram bot using urllib for HTTP requests."""
 
+import os
 import asyncio
 import json
-import os
-from urllib import parse, request
+from urllib import request, parse
 
 from pro_engine import ProEngine
 
@@ -39,7 +39,8 @@ async def get_updates(offset: int | None = None) -> list[dict]:
 async def send_message(chat_id: int, text: str) -> None:
     url = f"{API_URL}/sendMessage"
     payload = json.dumps({"chat_id": chat_id, "text": text}).encode()
-    req = request.Request(url, data=payload, headers={"Content-Type": "application/json"})
+    headers = {"Content-Type": "application/json"}
+    req = request.Request(url, data=payload, headers=headers)
     await _request(req)
 
 

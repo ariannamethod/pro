@@ -28,6 +28,7 @@ import pro_meta
 from pro_identity import swap_pronouns
 from watchfiles import awatch
 from transformers.blocks import SymbolicReasoner
+import meta_controller
 
 STATE_PATH = 'pro_state.json'
 HASH_PATH = 'dataset_sha.json'
@@ -107,6 +108,8 @@ class ProEngine:
         self.adapter_pool = self._load_adapters()
         self.reasoner = SymbolicReasoner()
         self.meta_controller = MetaController(self)
+        self.arch_controller = meta_controller.MetaController()
+        self.layer_config: Dict[str, int] = {}
 
     def _load_adapters(self) -> Dict[str, Dict]:
         pool: Dict[str, Dict] = {}
@@ -142,6 +145,16 @@ class ProEngine:
         scores.sort(reverse=True)
         return [self.adapter_pool[n]["weights"] for _, n in scores[:top_k]]
 
+    def _apply_layer_config(self, cfg: Dict[str, int]) -> None:
+        """Apply the selected layer configuration to the reasoner."""
+
+        self.layer_config = cfg
+        if hasattr(self.reasoner, "configure"):
+            try:
+                self.reasoner.configure(cfg)
+            except Exception:
+                pass
+
     async def setup(self) -> None:
         pro_predict._GRAPH = {}
         pro_predict._VECTORS = {}
@@ -158,6 +171,12 @@ class ProEngine:
             'char_ngram_inv',
         ]:
             self.state.setdefault(key, {})
+        self.state.setdefault('architectures', [])
+        arch_cfg = self.arch_controller.select()
+        self._apply_layer_config(arch_cfg)
+        logging.info("Selected architecture: %s", arch_cfg)
+        self.state['architectures'].append(arch_cfg)
+        await self.save_state()
         # Recompute inverse-frequency maps from counts
         for w, c in self.state['word_counts'].items():
             self.state['word_inv'][w] = 1.0 / c
@@ -965,6 +984,7 @@ class ProEngine:
             },
         )
         await self.meta_controller.update(resp_metrics)
+        self.arch_controller.update(resp_metrics)
         self.log(message, response, metrics)
         return response, metrics
 

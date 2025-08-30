@@ -818,6 +818,13 @@ class ProEngine:
         await pro_predict.enqueue_tokens(
             words + lowercase(tokenize(response))
         )
+        vocab_list = list(self.state.get("word_counts", {}).keys())
+        if vocab_list:
+            asyncio.create_task(
+                pro_predict.update_transformer(
+                    vocab_list, recent_msgs, recent_resps
+                )
+            )
         try:
             await self.save_state()
         except Exception as exc:  # pragma: no cover - logging side effect

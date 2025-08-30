@@ -1,4 +1,5 @@
 import asyncio
+import os
 
 import pro_engine
 import pro_memory
@@ -44,3 +45,19 @@ def test_process_message_blends_transformer(tmp_path, monkeypatch):
     assert called["tokens"] == ["hello", "world"]
     assert "foo" in captured["seed_words"]
     assert "baz" in captured["seed_words"]
+
+
+def test_logits_shift_after_training(tmp_path, monkeypatch):
+    db_path = tmp_path / "mem.db"
+    monkeypatch.setattr(pro_memory, "DB_PATH", str(db_path))
+    asyncio.run(pro_memory.init_db())
+    # ensure clean transformer state
+    if os.path.exists("pro_transformer.npz"):
+        os.remove("pro_transformer.npz")
+    asyncio.run(pro_memory.add_message("hello world"))
+    asyncio.run(pro_memory.store_response("foo"))
+    vocab = ["hello", "world", "foo"]
+    before = pro_predict.transformer_logits(["hello", "world"], vocab)["foo"]
+    asyncio.run(pro_predict.update_transformer(vocab))
+    after = pro_predict.transformer_logits(["hello", "world"], vocab)["foo"]
+    assert after != before

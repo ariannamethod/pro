@@ -2,6 +2,7 @@ import json
 import os
 from dataclasses import asdict, dataclass
 from typing import Dict, List
+import textwrap
 
 
 @dataclass
@@ -98,3 +99,37 @@ class MetricMonitor:
 
     def average(self) -> float:
         return sum(self.values) / len(self.values) if self.values else 0.0
+
+
+def generate_block_code(name: str, scale: float = 1.0) -> str:
+    """Return source code for a tiny processing block.
+
+    The generated code defines a class with ``forward`` method that multiplies
+    its input by ``scale``.  The resulting string can be compiled and loaded as
+    a module using :meth:`pro_engine.ProEngine.load_generated_block`.
+
+    Parameters
+    ----------
+    name:
+        Name of the class to generate.
+    scale:
+        Factor applied to the input in ``forward``.
+    """
+
+    template = f"""class {name}:
+    def __init__(self, scale={scale}):
+        self.scale = scale
+
+    def forward(self, x):
+        return x * self.scale
+"""
+
+    return textwrap.dedent(template)
+
+
+__all__ = [
+    "LoRALayer",
+    "LayerMutator",
+    "MetricMonitor",
+    "generate_block_code",
+]

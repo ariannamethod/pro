@@ -6,6 +6,8 @@ import asyncio
 import math
 import random
 import re
+import importlib.util
+import sys
 from typing import Dict, List, Tuple, Set, Optional
 from collections import Counter, deque
 
@@ -150,6 +152,44 @@ class ProEngine:
                 scores.append((score, name))
         scores.sort(reverse=True)
         return [self.adapter_pool[n]["weights"] for _, n in scores[:top_k]]
+
+    # Dynamic module loading --------------------------------------------
+
+    def load_generated_block(self, code: str, name: str = "GeneratedBlock"):
+        """Compile and register a generated block module.
+
+        The provided ``code`` should define a class with the given ``name``.
+        The resulting class is exposed via :mod:`transformers.blocks` so it can
+        be instantiated by training routines.
+
+        Parameters
+        ----------
+        code:
+            Source code of the module.
+        name:
+            Name of the class defined in ``code``.
+
+        Returns
+        -------
+        types.ModuleType
+            The compiled module object.
+        """
+
+        module_name = f"_generated_{name.lower()}"
+        spec = importlib.util.spec_from_loader(module_name, loader=None)
+        module = importlib.util.module_from_spec(spec)
+        exec(compile(code, module_name, "exec"), module.__dict__)
+        sys.modules[module_name] = module
+
+        try:
+            import transformers.blocks as tblocks
+
+            block_cls = getattr(module, name)
+            setattr(tblocks, name, block_cls)
+        except Exception:
+            pass
+
+        return module
 
     # Saliency helpers -------------------------------------------------
 

@@ -1,19 +1,29 @@
 """Basic morphological analysis utilities.
 
-This module provides a tiny helper for splitting a word into its root and
-affixes.  The implementation is deliberately simple – it merely strips a set of
-common prefixes and suffixes.  Results of the analysis are cached so repeated
-calls for the same word are inexpensive.
+This module provides helpers for splitting a word into morphemes and for
+producing a simple *resonant* encoding of a text.  The implementation is
+deliberately small – it merely strips a set of common prefixes and suffixes and
+hashes resulting morphemes into a fixed-size numeric vector.  Results of the
+analysis are cached so repeated calls for the same word are inexpensive.
 
-The module exposes a single public function :func:`split` which returns a tuple
-``(root, prefixes, suffixes)`` where prefixes and suffixes are returned as
-lists preserving their order.
+The main public functions are:
+
+``split``
+    Split a single word into ``(root, prefixes, suffixes)``.
+``tokenize``
+    Break a text into a flat list of morphemes.
+``encode``
+    Aggregate morphemes from a text into a deterministic fixed-size vector.
 """
 
 from __future__ import annotations
 
 from functools import lru_cache
+import hashlib
+import re
 from typing import List, Tuple
+
+import numpy as np
 
 # A tiny list of common Russian prefixes and suffixes.  The lists are not
 # exhaustive; they merely provide enough variety for simple experiments.
@@ -94,5 +104,42 @@ def split(word: str) -> Tuple[str, List[str], List[str]]:
     return root, prefixes, suffixes[::-1]
 
 
-__all__ = ["split"]
+def tokenize(text: str) -> List[str]:
+    """Return a flat list of morphemes extracted from ``text``.
+
+    The function splits ``text`` into words, applies :func:`split` to each and
+    flattens the resulting prefixes, root and suffixes into a single list.  All
+    words are lowercased and non-word characters are ignored.
+    """
+
+    morphs: List[str] = []
+    for word in re.findall(r"\w+", text.lower()):
+        root, prefixes, suffixes = split(word)
+        morphs.extend(prefixes + [root] + suffixes)
+    return morphs
+
+
+def encode(text: str, dim: int = 32) -> np.ndarray:
+    """Encode ``text`` into a fixed-size vector using morpheme hashing.
+
+    Parameters
+    ----------
+    text:
+        Input text to encode.
+    dim:
+        Dimension of the resulting vector.
+    """
+
+    vec = np.zeros(dim, dtype=np.float32)
+    for morph in tokenize(text):
+        h = hashlib.md5(morph.encode("utf-8")).hexdigest()
+        idx = int(h, 16) % dim
+        vec[idx] += 1.0
+    norm = np.linalg.norm(vec)
+    if norm > 0:
+        vec /= norm
+    return vec
+
+
+__all__ = ["split", "tokenize", "encode"]
 

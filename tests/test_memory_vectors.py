@@ -8,6 +8,9 @@ import pytest
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 
 import pro_memory  # noqa: E402
+from memory.memory_graph import MemoryGraphStore  # noqa: E402
+from memory.reinforce_retriever import ReinforceRetriever  # noqa: E402
+import morphology  # noqa: E402
 
 
 @pytest.mark.asyncio
@@ -27,3 +30,18 @@ async def test_store_and_fetch_similar_embeddings(tmp_path, monkeypatch):
     assert all(blob.size > 0 for blob in blobs)
     conn.close()
     await pro_memory.close_db()
+
+
+def test_morph_code_storage_and_retrieval():
+    store = MemoryGraphStore()
+    text = "привет мир"
+    store.add_utterance("dlg", "user", text)
+    dialogue = store.get_dialogue("dlg")
+    assert len(dialogue) == 1
+    node = dialogue[0]
+    expected = morphology.encode(text)
+    assert np.allclose(node.morph_codes, expected.tolist())
+
+    retriever = ReinforceRetriever(store)
+    vec = retriever.retrieve("dlg", "user")
+    assert np.allclose(vec, expected)

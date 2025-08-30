@@ -12,10 +12,11 @@ reward.
 
 from __future__ import annotations
 
-from typing import List, Optional, Tuple
+from typing import Optional, Tuple
 
 import numpy as np
 
+from morphology import encode as encode_morph
 from .memory_graph import MemoryGraphStore
 
 
@@ -33,15 +34,8 @@ class ReinforceRetriever:
 
     # ------------------------------------------------------------------ utils
     def _encode(self, text: str) -> np.ndarray:
-        """Encode *text* into a simple numeric vector."""
-        vec = np.zeros(self.dim, dtype=np.float32)
-        if not text:
-            return vec
-        for i, b in enumerate(text.encode("utf-8")):
-            if i >= self.dim:
-                break
-            vec[i] = b / 255.0
-        return vec
+        """Encode ``text`` using morpheme hashing."""
+        return encode_morph(text, self.dim)
 
     # ---------------------------------------------------------------- retrieval
     def retrieve(self, dialogue_id: str, speaker: str) -> np.ndarray:
@@ -52,17 +46,24 @@ class ReinforceRetriever:
         """
 
         dialogue = self.store.get_dialogue(dialogue_id)
-        messages = [n.text for n in dialogue if n.speaker == speaker]
-        if not messages:
+        nodes = [n for n in dialogue if n.speaker == speaker]
+        if not nodes:
             self._last = None
             return np.zeros(self.dim, dtype=np.float32)
 
-        vecs = np.stack([self._encode(m) for m in messages])  # (n, dim)
+        vecs = np.stack(
+            [
+                np.array(n.morph_codes, dtype=np.float32)
+                if n.morph_codes
+                else self._encode(n.text)
+                for n in nodes
+            ]
+        )  # (n, dim)
         logits = vecs @ self.w  # (n,)
         # Numerical stability for softmax
         exp = np.exp(logits - np.max(logits))
         probs = exp / exp.sum()
-        idx = int(np.random.choice(len(messages), p=probs))
+        idx = int(np.random.choice(len(nodes), p=probs))
         self._last = (vecs, probs, idx)
         # Expected memory vector used for attention
         weighted = probs @ vecs

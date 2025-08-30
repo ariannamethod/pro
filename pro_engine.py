@@ -26,6 +26,7 @@ import pro_predict
 import pro_forecast
 import pro_meta
 from pro_identity import swap_pronouns
+import grammar_filters
 from watchfiles import awatch
 from transformers.blocks import SymbolicReasoner
 import meta_controller
@@ -763,7 +764,10 @@ class ProEngine:
             for tok, analog in analog_map.items():
                 pattern = re.compile(rf"\b{re.escape(tok)}\b", re.IGNORECASE)
                 response = pattern.sub(analog, response)
-            if await pro_memory.is_unique(response):
+            if (
+                grammar_filters.passes_filters(response)
+                and await pro_memory.is_unique(response)
+            ):
                 await pro_memory.store_response(response)
                 if update_meta:
                     resp_metrics = await asyncio.to_thread(

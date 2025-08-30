@@ -1,6 +1,7 @@
 import os
 import sqlite3
 import asyncio
+import threading
 import pickle
 from collections import Counter, defaultdict
 from typing import Dict, List, Optional
@@ -21,20 +22,17 @@ TRANSFORMER_PATH = "pro_transformer.npz"
 _GRAPH: Dict[str, Counter] = {}
 _VECTORS: Dict[str, Dict[str, float]] = {}
 _SYNONYMS: Dict[str, str] = {}
-_LOCK = asyncio.Lock()
+_LOCK = threading.RLock()
 
 
 @contextlib.contextmanager
 def _vector_lock() -> None:
     """Synchronise access to the shared embedding structures."""
-    need_lock = not _LOCK.locked()
-    if need_lock:
-        asyncio.run(_LOCK.acquire())
+    _LOCK.acquire()
     try:
         yield
     finally:
-        if need_lock:
-            _LOCK.release()
+        _LOCK.release()
 
 
 if os.path.exists(DB_PATH):
@@ -127,7 +125,7 @@ async def update(word_list: List[str]) -> None:
     words become part of the internal vocabulary used by :func:`suggest`.
     """
     global _VECTORS
-    async with _LOCK:
+    with _vector_lock():
         _ensure_vectors()
         words = lowercase(word_list)
         for i, word in enumerate(words):

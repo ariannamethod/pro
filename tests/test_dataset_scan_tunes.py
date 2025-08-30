@@ -142,3 +142,29 @@ def test_async_tune_runs_concurrently(tmp_path, monkeypatch):
 
     assert max_running > 1
     assert max_running <= 2
+
+
+def test_scan_ignores_pickle_files(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    datasets_dir = tmp_path / "datasets"
+    datasets_dir.mkdir()
+    txt_file = datasets_dir / "sample.txt"
+    txt_file.write_text("data")
+    pkl_file = datasets_dir / "embeddings.pkl"
+    pkl_file.write_bytes(b"\x80\x04\x95")
+
+    engine = ProEngine()
+    called = []
+
+    async def fake_async_tune(paths):
+        called.extend(paths)
+
+    monkeypatch.setattr(engine, "_async_tune", fake_async_tune)
+
+    async def run_scan():
+        await engine.scan_datasets()
+        await asyncio.sleep(0)
+
+    asyncio.run(run_scan())
+    expected = os.path.join("datasets", "sample.txt")
+    assert called == [expected]

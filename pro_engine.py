@@ -8,6 +8,7 @@ import random
 import re
 import importlib.util
 import sys
+import subprocess
 from typing import Dict, List, Tuple, Set, Optional
 from collections import Counter, deque
 
@@ -27,6 +28,7 @@ import pro_rag_embedding
 import pro_predict
 import pro_forecast
 import pro_meta
+import dream_mode
 import lora_utils
 from autoadapt import LayerMutator
 from pro_identity import swap_pronouns
@@ -120,6 +122,7 @@ class ProEngine:
         self._tune_tasks: List[asyncio.Task] = []
         self._tune_semaphore = asyncio.BoundedSemaphore(TUNE_CONCURRENCY)
         self._compression_task: Optional[asyncio.Task] = None
+        self._dream_task: Optional[asyncio.Task] = None
         self.adapter_pool = self._load_adapters()
         self.reasoner = SymbolicReasoner()
         self.meta_controller = MetaController(self)
@@ -333,6 +336,46 @@ class ProEngine:
                     break
 
         self._compression_task = asyncio.create_task(_compression_worker())
+        self._start_dream_worker()
+
+    def _start_dream_worker(self) -> None:
+        if self._dream_task is None or self._dream_task.done():
+            self._dream_task = asyncio.create_task(self._dream_worker())
+
+    def _system_idle(self) -> bool:
+        try:
+            load = os.getloadavg()[0] / max(1, os.cpu_count() or 1)
+        except OSError:
+            load = 0.0
+        if load > 0.2:
+            return False
+        try:
+            out = subprocess.check_output(
+                [
+                    "nvidia-smi",
+                    "--query-gpu=utilization.gpu",
+                    "--format=csv,noheader,nounits",
+                ],
+                stderr=subprocess.DEVNULL,
+            )
+            util = int(out.decode().splitlines()[0])
+            if util > 10:
+                return False
+        except Exception:
+            pass
+        return True
+
+    async def _dream_worker(self) -> None:
+        try:
+            while True:
+                await asyncio.sleep(5)
+                if self._system_idle():
+                    try:
+                        await dream_mode.run(self)
+                    except Exception:
+                        pass
+        except asyncio.CancelledError:
+            pass
 
     def _start_tune_worker(self) -> None:
         if self._tune_worker_task is None or self._tune_worker_task.done():
@@ -461,6 +504,9 @@ class ProEngine:
         if self._compression_task is not None:
             self._compression_task.cancel()
             tasks.append(self._compression_task)
+        if self._dream_task is not None:
+            self._dream_task.cancel()
+            tasks.append(self._dream_task)
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
 

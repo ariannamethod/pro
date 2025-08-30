@@ -1,6 +1,6 @@
 import asyncio
 import atexit
-from typing import Dict, List, Tuple
+from typing import Dict, List, Tuple, Optional
 
 import numpy as np
 import pro_rag_embedding
@@ -25,13 +25,15 @@ async def encode_message(content: str) -> np.ndarray:
     return embedding.astype(np.float32)
 
 
-async def persist_embedding(content: str, embedding: np.ndarray) -> None:
+async def persist_embedding(
+    content: str, embedding: np.ndarray, tag: Optional[str] = None
+) -> None:
     """Persist a message and its embedding to the database."""
     async with get_connection() as conn:
         await asyncio.to_thread(
             conn.execute,
-            'INSERT INTO messages(content, embedding) VALUES (?, ?)',
-            (content, embedding.tobytes()),
+            'INSERT INTO messages(content, embedding, tag) VALUES (?, ?, ?)',
+            (content, embedding.tobytes(), tag),
         )
         await asyncio.to_thread(conn.commit)
 
@@ -103,14 +105,16 @@ async def reset_adapter_usage() -> None:
 atexit.register(lambda: asyncio.run(close_db()))
 
 
-async def add_message(content: str) -> None:
+async def add_message(content: str, tag: Optional[str] = None) -> None:
     """Encode a message, persist it, and update the search index."""
     embedding = await encode_message(content)
-    await persist_embedding(content, embedding)
+    await persist_embedding(content, embedding, tag)
     _add_to_index(content, embedding)
 
 
-async def store_if_novel(content: str, threshold: float = 0.1) -> bool:
+async def store_if_novel(
+    content: str, threshold: float = 0.1, tag: Optional[str] = None
+) -> bool:
     """Store ``content`` only if it is sufficiently different.
 
     The message is encoded and compared against existing embeddings using
@@ -133,7 +137,7 @@ async def store_if_novel(content: str, threshold: float = 0.1) -> bool:
         if distances.size and float(distances.min()) < threshold:
             return False
 
-    await persist_embedding(content, embedding)
+    await persist_embedding(content, embedding, tag)
     _add_to_index(content, embedding)
     return True
 
@@ -182,11 +186,13 @@ async def is_unique(sentence: str) -> bool:
     return exists is None
 
 
-async def store_response(sentence: str) -> None:
+async def store_response(sentence: str, tag: Optional[str] = None) -> None:
     """Persist a generated response."""
     async with get_connection() as conn:
         await asyncio.to_thread(
-            conn.execute, 'INSERT INTO responses(content) VALUES (?)', (sentence,)
+            conn.execute,
+            'INSERT INTO responses(content, tag) VALUES (?, ?)',
+            (sentence, tag),
         )
         await asyncio.to_thread(conn.commit)
 

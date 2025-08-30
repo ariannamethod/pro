@@ -1,99 +1,97 @@
-"""Lightweight graph-based memory store.
-
-This module defines two classes:
-
-* :class:`MemoryGraphStore` - a tiny in-memory graph where dialogue turns
-  are stored as nodes. Each dialogue is represented as a list of nodes but the
-  structure can be easily extended with richer relations.
-* :class:`GraphRetriever` - helper that looks up information from the
-  ``MemoryGraphStore``.
-
-The implementation avoids external dependencies and can optionally persist
-its state to disk via JSON serialization.
-"""
+"""Differentiable in-memory graph store."""
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field, asdict
-import json
-import os
+from dataclasses import dataclass
 from typing import Dict, List, Optional
+
+from autograd import numpy as anp
 
 from morphology import encode as encode_morph
 
 
 @dataclass
 class MemoryNode:
-    """Single utterance within a dialogue."""
-
     speaker: str
     text: str
-    morph_codes: List[float] = field(default_factory=list)
+    index: int
 
 
 class MemoryGraphStore:
-    """Store dialogues as simple graphs."""
+    """Store dialogues with an embedding matrix for gradient-based retrieval."""
 
-    def __init__(self, path: Optional[str] = None) -> None:
-        self.path = path
+    def __init__(self, dim: int = 32) -> None:
+        self.dim = dim
         self.graph: Dict[str, List[MemoryNode]] = {}
-        if path and os.path.exists(path):
-            self.load(path)
+        self.embeddings = anp.zeros((0, dim))
 
-    def add_utterance(self, dialogue_id: str, speaker: str, text: str) -> None:
-        """Append an utterance to a dialogue and persist to disk."""
+    def add_utterance(self, dialogue_id: str, speaker: str, text: str) -> anp.ndarray:
+        """Encode ``text`` and append it to ``dialogue_id``.
 
-        codes = encode_morph(text).tolist()
-        self.graph.setdefault(dialogue_id, []).append(
-            MemoryNode(speaker, text, codes)
-        )
-        if self.path:
-            self.save(self.path)
+        Returns the stored embedding which participates in gradients when
+        ``retrieve`` is used with Autograd.
+        """
+
+        vec = anp.array(encode_morph(text, self.dim))
+        if self.embeddings.size:
+            self.embeddings = anp.vstack([self.embeddings, vec])
+        else:
+            self.embeddings = vec.reshape(1, -1)
+        idx = self.embeddings.shape[0] - 1
+        self.graph.setdefault(dialogue_id, []).append(MemoryNode(speaker, text, idx))
+        return self.embeddings[idx]
 
     def get_dialogue(self, dialogue_id: str) -> List[MemoryNode]:
-        """Return the list of utterances for *dialogue_id*."""
-
         return list(self.graph.get(dialogue_id, []))
 
-    # Persistence -------------------------------------------------------
-    def save(self, path: Optional[str] = None) -> None:
-        path = path or self.path
-        if not path:
-            return
-        data = {
-            did: [asdict(node) for node in nodes]
-            for did, nodes in self.graph.items()
-        }
-        with open(path, "w", encoding="utf-8") as fh:
-            json.dump(data, fh, ensure_ascii=False)
-        self.path = path
+    def embeddings_for(self, dialogue_id: str, speaker: Optional[str] = None) -> anp.ndarray:
+        idxs = [
+            n.index
+            for n in self.graph.get(dialogue_id, [])
+            if speaker is None or n.speaker == speaker
+        ]
+        if not idxs:
+            return anp.zeros((0, self.dim))
+        return self.embeddings[idxs]
 
-    def load(self, path: str) -> None:
-        with open(path, "r", encoding="utf-8") as fh:
-            raw = json.load(fh)
-        self.graph = {
-            did: [MemoryNode(**node) for node in nodes]
-            for did, nodes in raw.items()
-        }
-        self.path = path
+    def retrieve(
+        self,
+        query: anp.ndarray,
+        dialogue_id: str,
+        speaker: Optional[str] = None,
+        embeddings: Optional[anp.ndarray] = None,
+    ) -> anp.ndarray:
+        """Return a weighted memory vector for ``query`` using softmax weighting."""
+
+        vecs = embeddings if embeddings is not None else self.embeddings_for(dialogue_id, speaker)
+        if vecs.shape[0] == 0:
+            return anp.zeros(self.dim)
+        scores = vecs @ query
+        # numerical stability
+        scores = scores - anp.max(scores)
+        weights = anp.exp(scores)
+        weights = weights / anp.sum(weights)
+        return weights @ vecs
 
 
 class GraphRetriever:
-    """Small helper to fetch facts from :class:`MemoryGraphStore`."""
+    """Helper that provides high level queries over :class:`MemoryGraphStore`."""
 
     def __init__(self, store: MemoryGraphStore) -> None:
         self.store = store
 
     def last_message(self, dialogue_id: str, speaker: str) -> Optional[str]:
-        """Return the most recent message for ``speaker`` in ``dialogue_id``."""
-
-        dialogue = self.store.get_dialogue(dialogue_id)
-        for node in reversed(dialogue):
+        for node in reversed(self.store.get_dialogue(dialogue_id)):
             if node.speaker == speaker:
                 return node.text
         return None
 
     def all_messages(self, dialogue_id: str) -> List[str]:
-        """Return all message texts from ``dialogue_id``."""
+        return [n.text for n in self.store.get_dialogue(dialogue_id)]
 
-        return [node.text for node in self.store.get_dialogue(dialogue_id)]
+    def retrieve(
+        self, dialogue_id: str, speaker: str, query: Optional[anp.ndarray] = None
+    ) -> anp.ndarray:
+        if query is None:
+            query = anp.zeros(self.store.dim)
+        return self.store.retrieve(query, dialogue_id, speaker)

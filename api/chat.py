@@ -19,8 +19,10 @@ from transformers.modeling_transformer import MemoryAttention
 class ChatAPI:
     """Minimal interface for interacting with the memory graph."""
 
-    def __init__(self, path: str = "memory_graph.json", dim: int = 32) -> None:
-        self.store = MemoryGraphStore(path)
+    def __init__(self, path: Optional[str] = None, dim: int = 32) -> None:
+        # ``path`` is accepted for backwards compatibility but the new
+        # ``MemoryGraphStore`` keeps all data in-memory.
+        self.store = MemoryGraphStore(dim=dim)
         self.retriever = GraphRetriever(self.store)
         self.attention = MemoryAttention(self.retriever, dim=dim)
 

@@ -28,6 +28,16 @@ async def init_pool(db_path: str, size: int = 1) -> None:
             "CREATE TABLE IF NOT EXISTS responses("  # noqa: E501
             "id INTEGER PRIMARY KEY AUTOINCREMENT, content TEXT)"
         )
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS concepts("  # noqa: E501
+            "id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE)"
+        )
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS relations("  # noqa: E501
+            "id INTEGER PRIMARY KEY AUTOINCREMENT, source INTEGER, target INTEGER, relation TEXT,"
+            "FOREIGN KEY(source) REFERENCES concepts(id),"
+            "FOREIGN KEY(target) REFERENCES concepts(id))"
+        )
         # Ensure embedding column exists for pre-existing databases
         try:
             conn.execute("ALTER TABLE messages ADD COLUMN embedding BLOB")

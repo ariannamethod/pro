@@ -11,9 +11,10 @@ lightweight hook where a memory graph can influence the computation.
 
 from __future__ import annotations
 
-from typing import Optional, Union
+from typing import Union
 
 import numpy as np
+import morphology
 
 from memory.memory_graph import GraphRetriever
 from memory.reinforce_retriever import ReinforceRetriever
@@ -39,14 +40,40 @@ class MemoryAttention:
         self.dim = dim
 
     def _encode(self, text: str) -> np.ndarray:
-        vec = np.zeros(self.dim, dtype=np.float32)
+        """Encode ``text`` into a deterministic vector.
+
+        The message is first converted into a base vector by normalising the
+        raw bytes.  The word is then analysed morphologically using
+        :func:`morphology.split` and the root and concatenated affixes are
+        encoded into the first and second halves of the vector respectively.
+        These sub-vectors are added to the base representation.
+        """
+
+        base = np.zeros(self.dim, dtype=np.float32)
         if not text:
-            return vec
+            return base
+        # Base encoding of the full word.
         for i, b in enumerate(text.encode("utf-8")):
             if i >= self.dim:
                 break
-            vec[i] = b / 255.0
-        return vec
+            base[i] = b / 255.0
+
+        # Morphological encoding.
+        root, prefixes, suffixes = morphology.split(text)
+        half = self.dim // 2
+        root_vec = np.zeros(self.dim, dtype=np.float32)
+        for i, b in enumerate(root.encode("utf-8")):
+            if i >= half:
+                break
+            root_vec[i] = b / 255.0
+
+        affixes = "".join(prefixes + suffixes)
+        for i, b in enumerate(affixes.encode("utf-8")):
+            if i >= self.dim - half:
+                break
+            root_vec[half + i] = b / 255.0
+
+        return base + root_vec
 
     def __call__(
         self, hidden_states: np.ndarray, dialogue_id: str, speaker: str

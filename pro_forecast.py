@@ -55,3 +55,31 @@ def simulate_paths(seeds: List[str], depth: int = 2) -> ForecastNode:
         return node
 
     return _expand(seeds, depth, 1.0)
+
+
+def backpropagate_forecast(node: ForecastNode) -> None:
+    """Propagate novelty backwards to update prediction weights.
+
+    The update scales the learning rate by ``node.novelty`` so that
+    highly unexpected branches have a proportionally larger influence on
+    the underlying :class:`pro_predict.MiniSelfAttention` model. The
+    function walks the entire subtree rooted at ``node`` and applies a
+    small training step for each node that represents at least one
+    prediction (i.e. ``len(tokens) > 1``).
+    """
+
+    pro_predict._ensure_vectors()
+    vocab = list(pro_predict._VECTORS.keys())
+    model_key = tuple(vocab)
+    if model_key not in pro_predict._TRANSFORMERS:
+        pro_predict._TRANSFORMERS[model_key] = pro_predict.MiniSelfAttention(vocab)
+    model = pro_predict._TRANSFORMERS[model_key]
+
+    tokens = node.text.split()
+    if len(tokens) > 1 and node.novelty > 0:
+        context, target = tokens[:-1], tokens[-1]
+        lr = 0.1 * node.novelty
+        model.train_step(context, target, lr=lr)
+
+    for child in node.children:
+        backpropagate_forecast(child)

@@ -3,6 +3,7 @@ from autoadapt import LayerMutator, MetricMonitor
 import numpy as np
 from quantum_memory import QuantumMemory
 from transformers.time_fold import TimeFoldTransformer
+from pro_forecast import simulate_paths, backpropagate_forecast
 
 
 class Trainer:
@@ -26,6 +27,8 @@ class Trainer:
 
     def train_step(self, layer: str, metric: float) -> None:
         """Simulate a training step and record metric for ``layer``."""
+        forecast = simulate_paths([layer])
+        backpropagate_forecast(forecast)
         self.monitor.record(metric)
         if self.time_fold_steps > 1:
             self._gradient_echo(metric)

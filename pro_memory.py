@@ -78,6 +78,34 @@ async def add_message(content: str) -> None:
     _add_to_index(content, embedding)
 
 
+async def store_if_novel(content: str, threshold: float = 0.1) -> bool:
+    """Store ``content`` only if it is sufficiently different.
+
+    The message is encoded and compared against existing embeddings using
+    Euclidean distance.  If the closest stored message is within ``threshold``
+    distance, the content is considered a duplicate and is not stored.
+
+    Args:
+        content: Text to potentially store.
+        threshold: Minimum distance required to treat the message as novel.
+
+    Returns:
+        ``True`` if the message was stored, ``False`` otherwise.
+    """
+    if _VECTORS is None or not _MESSAGES:
+        await build_index()
+
+    embedding = await encode_message(content)
+    if _VECTORS is not None:
+        distances = np.linalg.norm(_VECTORS - embedding, axis=1)
+        if distances.size and float(distances.min()) < threshold:
+            return False
+
+    await persist_embedding(content, embedding)
+    _add_to_index(content, embedding)
+    return True
+
+
 async def add_concept(description: str) -> None:
     """Extract entities and relations from text and store them."""
     entities, relations = await pro_rag_embedding.extract_entities_relations(

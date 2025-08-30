@@ -32,7 +32,7 @@ def test_process_message_blends_transformer(tmp_path, monkeypatch):
 
     captured = {}
 
-    def fake_respond(seed_words, vocab=None):
+    def fake_respond(seed_words, vocab=None, **kwargs):
         captured["seed_words"] = list(seed_words)
         return "ok"
 

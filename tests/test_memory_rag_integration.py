@@ -81,3 +81,14 @@ def test_sqlite_connection_open_close(engine, monkeypatch):
     # With a pooled sqlite connection, no new connections should be opened.
     assert counts["connect"] == 0
     assert counts["close"] == 0
+
+@pytest.mark.asyncio
+async def test_retrieve_vectors_and_word_overlap(engine):
+    await pro_memory.add_message("measurement")
+    await pro_memory.add_message("zzyzx")
+
+    result = await pro_rag.retrieve(["science"])
+    assert result == ["measurement"]
+
+    result = await pro_rag.retrieve(["zzyzx"])
+    assert result == ["zzyzx"]

@@ -33,7 +33,7 @@ def analyze_sequences(state: Dict, words: List[str], char_n: int = 3) -> None:
         ti[key][word] = 1.0 / tc[key][word]
         if cnc is not None:
             for i in range(len(word) - char_n + 1):
-                ngram = word[i : i + char_n]
+                ngram = word[i:i + char_n]
                 cnc[ngram] = cnc.get(ngram, 0) + 1
                 cni[ngram] = 1.0 / cnc[ngram]
         prev2, prev1 = prev1, word

@@ -13,10 +13,13 @@ class Trainer:
         eval_interval: int = 10,
         checkpoint_dir: str = "checkpoints/autoadapt",
         time_fold_steps: int = 1,
+        use_lora: bool = False,
     ) -> None:
         self.eval_interval = eval_interval
         self.monitor = MetricMonitor()
-        self.mutator = LayerMutator()
+        self.mutator = LayerMutator(use_lora=use_lora)
+        if use_lora:
+            self.mutator.load(checkpoint_dir)
         self.step = 0
         self.checkpoint_dir = checkpoint_dir
         self.time_fold_steps = time_fold_steps

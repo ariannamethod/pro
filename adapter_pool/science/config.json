@@ -1,5 +1,6 @@
 {
   "name": "science",
   "keywords": ["science", "physics"],
-  "weights_path": "weights.json"
+  "weights_path": "weights.json",
+  "use_lora": false
 }

@@ -40,6 +40,10 @@ async def init_pool(db_path: str, size: int = 1) -> None:
             "FOREIGN KEY(source) REFERENCES concepts(id),"
             "FOREIGN KEY(target) REFERENCES concepts(id))"
         )
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS adapter_usage("  # noqa: E501
+            "adapter TEXT PRIMARY KEY, count INTEGER)"
+        )
         # Ensure embedding column exists for pre-existing databases
         try:
             conn.execute("ALTER TABLE messages ADD COLUMN embedding BLOB")

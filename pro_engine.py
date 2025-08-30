@@ -27,6 +27,8 @@ import pro_rag_embedding
 import pro_predict
 import pro_forecast
 import pro_meta
+import lora_utils
+from autoadapt import LayerMutator
 from pro_identity import swap_pronouns
 import grammar_filters
 from watchfiles import awatch
@@ -38,6 +40,7 @@ STATE_PATH = 'pro_state.json'
 HASH_PATH = 'dataset_sha.json'
 LOG_PATH = 'pro.log'
 TUNE_CONCURRENCY = 4
+COMPRESSION_INTERVAL = 100
 
 FORBIDDEN_ENDINGS = {"the", "a", "and", "or", "his", "my", "their"}
 
@@ -113,6 +116,7 @@ class ProEngine:
         self._watcher_task: Optional[asyncio.Task] = None
         self._tune_tasks: List[asyncio.Task] = []
         self._tune_semaphore = asyncio.BoundedSemaphore(TUNE_CONCURRENCY)
+        self._compression_task: Optional[asyncio.Task] = None
         self.adapter_pool = self._load_adapters()
         self.reasoner = SymbolicReasoner()
         self.meta_controller = MetaController(self)
@@ -142,7 +146,9 @@ class ProEngine:
                 continue
         return pool
 
-    def select_adapters(self, prompt: str, top_k: int = 1) -> List[Dict[str, float]]:
+    def select_adapters(
+        self, prompt: str, top_k: int = 1
+    ) -> List[Tuple[str, Dict[str, float]]]:
         tokens = lowercase(tokenize(prompt))
         scores: List[Tuple[int, str]] = []
         for name, data in self.adapter_pool.items():
@@ -151,7 +157,10 @@ class ProEngine:
             if score:
                 scores.append((score, name))
         scores.sort(reverse=True)
-        return [self.adapter_pool[n]["weights"] for _, n in scores[:top_k]]
+        return [
+            (n, self.adapter_pool[n]["weights"])
+            for _, n in scores[:top_k]
+        ]
 
     # Dynamic module loading --------------------------------------------
 
@@ -304,6 +313,24 @@ class ProEngine:
 
         self._watcher_task = asyncio.create_task(_watch_datasets())
 
+        async def _compression_worker() -> None:
+            while True:
+                try:
+                    count = await pro_memory.total_adapter_usage()
+                    if count >= COMPRESSION_INTERVAL:
+                        try:
+                            mut = LayerMutator(use_lora=True)
+                            mut.load('adapter_pool')
+                            lora_utils.prune_and_merge(mut.lora_layers)
+                        except Exception as exc:  # pragma: no cover - logging side effect
+                            logging.error("Compression failed: %s", exc)
+                        await pro_memory.reset_adapter_usage()
+                    await asyncio.sleep(0.1)
+                except asyncio.CancelledError:
+                    break
+
+        self._compression_task = asyncio.create_task(_compression_worker())
+
     def _start_tune_worker(self) -> None:
         if self._tune_worker_task is None or self._tune_worker_task.done():
             self._tune_worker_task = asyncio.create_task(self._tune_worker())
@@ -381,8 +408,14 @@ class ProEngine:
             async with self._tune_semaphore:
                 try:
                     weight = float(weights.get(os.path.basename(path), 1.0))
+                    adapters = self.select_adapters(path)
+                    adapter_names = [n for n, _ in adapters]
                     await asyncio.to_thread(
-                        pro_tune.train_weighted, self.state, path, weight
+                        pro_tune.train_weighted,
+                        self.state,
+                        path,
+                        weight,
+                        adapter_names,
                     )
                     tuned.append(os.path.basename(path))
                 except Exception as exc:  # pragma: no cover - logging side effect
@@ -404,6 +437,9 @@ class ProEngine:
         for task in self._tune_tasks:
             task.cancel()
             tasks.append(task)
+        if self._compression_task is not None:
+            self._compression_task.cancel()
+            tasks.append(self._compression_task)
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
 
@@ -855,7 +891,8 @@ class ProEngine:
         )
         original_words = tokenize(message)
         words = lowercase(original_words)
-        adapters = self.select_adapters(message)
+        adapter_pairs = self.select_adapters(message)
+        adapters = [w for _, w in adapter_pairs]
         words = swap_pronouns(words)
         user_forbidden = set(words)
         msg_emb = await pro_rag_embedding.embed_sentence(message)

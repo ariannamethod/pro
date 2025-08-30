@@ -1,5 +1,7 @@
 import os
 import sqlite3
+import asyncio
+import pickle
 from collections import Counter, defaultdict
 from typing import Dict, List, Optional
 import math
@@ -57,12 +59,42 @@ def _build_embeddings(
     return vectors
 
 
+def save_embeddings(
+    graph: Dict[str, Counter],
+    vectors: Dict[str, Dict[str, float]],
+    path: str = "datasets/embeddings.pkl",
+) -> None:
+    """Persist *graph* and *vectors* to *path* using pickle."""
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "wb") as fh:
+        pickle.dump((graph, vectors), fh)
+
+
+def load_embeddings(
+    path: str = "datasets/embeddings.pkl",
+) -> Optional[tuple]:
+    """Load *graph* and *vectors* from *path* if it exists."""
+    if not os.path.exists(path):
+        raise FileNotFoundError(path)
+    with open(path, "rb") as fh:
+        return pickle.load(fh)
+
+
 def _ensure_vectors() -> None:
     global _GRAPH, _VECTORS
     if _VECTORS:
         return
-    _GRAPH = _build_graph()
-    _VECTORS = _build_embeddings(_GRAPH)
+    try:
+        _GRAPH, _VECTORS = load_embeddings()
+        if not _VECTORS:
+            raise ValueError("empty embeddings")
+    except Exception:
+        _GRAPH = _build_graph()
+        _VECTORS = _build_embeddings(_GRAPH)
+        try:
+            save_embeddings(_GRAPH, _VECTORS)
+        except Exception:
+            pass
 
 
 async def update(word_list: List[str]) -> None:
@@ -82,6 +114,7 @@ async def update(word_list: List[str]) -> None:
             _GRAPH.setdefault(word, Counter())[other] += 1
             _GRAPH.setdefault(other, Counter())[word] += 1
     _VECTORS = _build_embeddings(_GRAPH)
+    asyncio.create_task(asyncio.to_thread(save_embeddings, _GRAPH, _VECTORS))
 
 
 def suggest(word: str, topn: int = 3) -> List[str]:

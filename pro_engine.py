@@ -275,7 +275,7 @@ class ProEngine:
         best_seq = beams[0][0] if beams else start_seq
         return best_seq[:target_length]
 
-    def respond(
+    async def respond(
         self,
         seeds: List[str],
         vocab: Optional[Dict[str, int]] = None,
@@ -490,8 +490,8 @@ class ProEngine:
             for tok, analog in analog_map.items():
                 pattern = re.compile(rf"\b{re.escape(tok)}\b", re.IGNORECASE)
                 response = pattern.sub(analog, response)
-            if pro_memory.is_unique(response):
-                pro_memory.store_response(response)
+            if await pro_memory.is_unique(response):
+                await pro_memory.store_response(response)
                 return response
             if extra_idx < len(ordered_vocab):
                 attempt_seeds = list(attempt_seeds) + [ordered_vocab[extra_idx]]
@@ -573,14 +573,14 @@ class ProEngine:
                 weight *= 2
             combined_vocab[w] = weight
         if self.chaos_factor:
-            response = self.respond(
+            response = await self.respond(
                 seed_words,
                 combined_vocab,
                 chaos_factor=self.chaos_factor,
                 forbidden=user_forbidden,
             )
         else:
-            response = self.respond(
+            response = await self.respond(
                 seed_words, combined_vocab, forbidden=user_forbidden
             )
         try:

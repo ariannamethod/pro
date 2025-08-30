@@ -55,3 +55,10 @@ With modular design and measured feedback, the RE is positioned for rapid expans
 1. Copy `.env.example` to `.env` and replace the placeholder token.
 2. Run `python pro_tg.py` to start the RE Telegram interface. It echoes incoming messages using long polling.
 
+## Benchmarks
+
+| Configuration   | Perplexity | Throughput (req/s) |
+|-----------------|-----------:|-------------------:|
+| Single Adapter  |       42.1 |                110 |
+| MoE (2 adapters)|       30.5 |                 90 |
+

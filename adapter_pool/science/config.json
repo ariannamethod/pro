@@ -1,0 +1,5 @@
+{
+  "name": "science",
+  "keywords": ["science", "physics"],
+  "weights_path": "weights.json"
+}

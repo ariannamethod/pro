@@ -57,6 +57,41 @@ class ProEngine:
         self._watcher_task: Optional[asyncio.Task] = None
         self._tune_tasks: List[asyncio.Task] = []
         self._tune_semaphore = asyncio.BoundedSemaphore(TUNE_CONCURRENCY)
+        self.adapter_pool = self._load_adapters()
+
+    def _load_adapters(self) -> Dict[str, Dict]:
+        pool: Dict[str, Dict] = {}
+        base = "adapter_pool"
+        if not os.path.isdir(base):
+            return pool
+        for name in os.listdir(base):
+            cfg_path = os.path.join(base, name, "config.json")
+            if not os.path.isfile(cfg_path):
+                continue
+            try:
+                with open(cfg_path, "r", encoding="utf-8") as fh:
+                    cfg = json.load(fh)
+                weights_file = cfg.get("weights_path", "weights.json")
+                wpath = os.path.join(base, name, weights_file)
+                weights: Dict[str, float] = {}
+                if os.path.isfile(wpath):
+                    with open(wpath, "r", encoding="utf-8") as fh:
+                        weights = json.load(fh)
+                pool[name] = {"config": cfg, "weights": weights}
+            except Exception:
+                continue
+        return pool
+
+    def select_adapters(self, prompt: str, top_k: int = 1) -> List[Dict[str, float]]:
+        tokens = lowercase(tokenize(prompt))
+        scores: List[Tuple[int, str]] = []
+        for name, data in self.adapter_pool.items():
+            keywords = data.get("config", {}).get("keywords", [])
+            score = sum(tokens.count(k) for k in keywords)
+            if score:
+                scores.append((score, name))
+        scores.sort(reverse=True)
+        return [self.adapter_pool[n]["weights"] for _, n in scores[:top_k]]
 
     async def setup(self) -> None:
         pro_predict._GRAPH = {}
@@ -675,6 +710,7 @@ class ProEngine:
         )
         original_words = tokenize(message)
         words = lowercase(original_words)
+        adapters = self.select_adapters(message)
         words = swap_pronouns(words)
         user_forbidden = set(words)
         msg_emb = await pro_rag_embedding.embed_sentence(message)
@@ -695,7 +731,7 @@ class ProEngine:
         vocab = list(self.state.get("word_counts", {}).keys())
         if vocab:
             logits = await asyncio.to_thread(
-                pro_predict.transformer_logits, words[-5:], vocab
+                pro_predict.transformer_logits, words[-5:], vocab, adapters
             )
             trans_pred = max(logits, key=logits.get)
         blend: List[str] = []

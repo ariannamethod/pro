@@ -30,7 +30,7 @@ def _cosine(a: Dict[str, float], b: Dict[str, float]) -> float:
 
 
 async def retrieve(query_words: List[str], limit: int = 5) -> List[str]:
-    """Retrieve relevant messages combining word overlap and embedding similarity."""
+    """Retrieve context combining messages and concept relations."""
     await asyncio.to_thread(pro_predict._ensure_vectors)
     messages = await pro_memory.fetch_recent_messages(50)
     qwords = lowercase(query_words)
@@ -48,4 +48,6 @@ async def retrieve(query_words: List[str], limit: int = 5) -> List[str]:
         if score > 0:
             scored.append((score, msg))
     scored.sort(reverse=True)
-    return [m for _, m in scored[:limit]]
+    graph_context = await pro_memory.fetch_related_concepts(qwords)
+    combined = graph_context + [m for _, m in scored]
+    return combined[:limit]

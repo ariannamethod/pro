@@ -25,3 +25,43 @@ async def embed_sentence(text: str) -> np.ndarray:
         if norm:
             emb = emb / norm
         return emb.astype(np.float32)
+
+
+async def extract_entities_relations(text: str):
+    """Naively extract entities and relations from a description.
+
+    This lightweight helper looks for patterns of the form
+    ``<subject> <verb> <object>`` using a small set of linking verbs.
+    It returns a tuple ``(entities, relations)`` where ``entities`` is a
+    list of unique concept names and ``relations`` is a list of
+    ``(subject, verb, object)`` triples.
+    """
+
+    words = text.strip().split()
+    lowered = [w.lower() for w in words]
+    verbs = ["is", "are", "has", "have"]
+    entities: list[str] = []
+    relations: list[tuple[str, str, str]] = []
+
+    for verb in verbs:
+        if verb in lowered:
+            idx = lowered.index(verb)
+            subject = " ".join(words[:idx]).strip()
+            obj = " ".join(words[idx + 1 :]).strip()
+            if subject and obj:
+                entities.extend([subject, obj])
+                relations.append((subject, verb, obj))
+            break
+
+    if not entities and text.strip():
+        entities = [text.strip()]
+
+    # deduplicate while preserving order
+    seen = set()
+    unique_entities = []
+    for ent in entities:
+        if ent not in seen:
+            seen.add(ent)
+            unique_entities.append(ent)
+
+    return unique_entities, relations

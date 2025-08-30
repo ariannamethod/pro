@@ -21,6 +21,8 @@ import morphology
 
 from memory.memory_graph import GraphRetriever
 from memory.reinforce_retriever import ReinforceRetriever
+from .quantum_attention import QuantumAttention
+from .quantum_memory_attention import QuantumMemoryAttention
 
 
 _kernel: Optional[Callable[[np.ndarray, np.ndarray], np.ndarray]] = None
@@ -183,3 +185,22 @@ class QuantumHybridAttention:
                     query[idx], key, value
                 )
         return out
+
+
+class QuantumMemoryLayer:
+    """Integrate retrieved memory into a quantum attention step."""
+
+    def __init__(
+        self, retriever: ReinforceRetriever, backend: QuantumAttention | None = None
+    ) -> None:
+        self.attention = QuantumMemoryAttention(retriever, backend)
+
+    def __call__(
+        self,
+        query: np.ndarray,
+        key: np.ndarray,
+        value: np.ndarray,
+        dialogue_id: str,
+        speaker: str,
+    ) -> np.ndarray:
+        return self.attention.attention(query, key, value, dialogue_id, speaker)

@@ -467,9 +467,13 @@ class ProEngine:
             words2[0] = first2
             sentence2 = " ".join(filter(None, words2[:target_length2])) + "."
             last1 = sentence1.rstrip(".").split()[-1].lower()
-            if last1 in {"the", "a"}:
+            if last1 in {"the", "a", "and", "or"}:
                 replacement = next(
-                    (w for w in ordered if w.lower() not in {"the", "a"}),
+                    (
+                        w
+                        for w in ordered
+                        if w.lower() not in {"the", "a", "and", "or"}
+                    ),
                     last1,
                 )
                 parts = sentence1.rstrip(".").split()
@@ -477,9 +481,13 @@ class ProEngine:
                 sentence1 = " ".join(parts) + "."
 
             last2 = sentence2.rstrip(".").split()[-1].lower()
-            if last2 in {"the", "a"}:
+            if last2 in {"the", "a", "and", "or"}:
                 replacement2 = next(
-                    (w for w in ordered2 if w.lower() not in {"the", "a"}),
+                    (
+                        w
+                        for w in ordered2
+                        if w.lower() not in {"the", "a", "and", "or"}
+                    ),
                     last2,
                 )
                 parts2 = sentence2.rstrip(".").split()

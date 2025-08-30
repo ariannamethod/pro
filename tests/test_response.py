@@ -57,7 +57,7 @@ def test_response_uses_trigram_prediction(tmp_path, monkeypatch):
         "exists",
         lambda p, _real=real_exists: False if p == "datasets" else _real(p),
     )
-    sentence = engine.respond(["hello", "WORLD"])
+    sentence = asyncio.run(engine.respond(["hello", "WORLD"]))
     first_words, second_words = _split_two_sentences(sentence)
     metrics = pro_metrics.compute_metrics(
         ["hello", "world"],
@@ -120,7 +120,7 @@ def test_preserves_first_word_capitalization(tmp_path, monkeypatch):
         "opens": 1,
         "today": 1,
     }
-    sentence = engine.respond(["NASA", "launch"])
+    sentence = asyncio.run(engine.respond(["NASA", "launch"]))
     first_words, second_words = _split_two_sentences(sentence)
     metrics = pro_metrics.compute_metrics(
         ["nasa", "launch"],
@@ -172,8 +172,8 @@ def test_duplicate_responses_suppressed(tmp_path, monkeypatch):
         "bar": 2,
         "baz": 1,
     }
-    first = engine.respond(["hello", "world"])
-    second = engine.respond(["hello", "world"])
+    first = asyncio.run(engine.respond(["hello", "world"]))
+    second = asyncio.run(engine.respond(["hello", "world"]))
     f1_first, f1_second = _split_two_sentences(first)
     f2_first, f2_second = _split_two_sentences(second)
     metrics = pro_metrics.compute_metrics(
@@ -250,8 +250,8 @@ def test_response_variable_length_output(tmp_path, monkeypatch):
     monkeypatch.setattr(pro_memory, "DB_PATH", str(db_path))
     asyncio.run(pro_memory.init_db())
     engine = pro_engine.ProEngine()
-    sentence1 = engine.respond(["a", "b"])
-    sentence2 = engine.respond(["a", "b", "c", "d"])
+    sentence1 = asyncio.run(engine.respond(["a", "b"]))
+    sentence2 = asyncio.run(engine.respond(["a", "b", "c", "d"]))
     f1_first, f1_second = _split_two_sentences(sentence1)
     f2_first, f2_second = _split_two_sentences(sentence2)
     metrics1 = pro_metrics.compute_metrics(

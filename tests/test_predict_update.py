@@ -12,11 +12,10 @@ def test_predict_learns_new_words(tmp_path, monkeypatch):
 
     engine = pro_engine.ProEngine()
 
-    monkeypatch.setattr(
-        pro_engine.ProEngine,
-        "respond",
-        lambda self, seeds, vocab=None, **kwargs: "music",
-    )
+    async def fake_respond(self, seeds, vocab=None, **kwargs):
+        return "music"
+
+    monkeypatch.setattr(pro_engine.ProEngine, "respond", fake_respond)
 
     async def dummy_retrieve(words, limit=5):
         return []

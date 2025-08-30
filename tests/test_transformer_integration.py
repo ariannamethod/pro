@@ -20,7 +20,10 @@ def test_process_message_blends_transformer(tmp_path, monkeypatch):
     engine.state["word_counts"] = {"hello": 1, "world": 1, "foo": 1, "baz": 1}
     engine.state["bigram_counts"] = {"world": {"foo": 1}}
     engine.state["trigram_counts"] = {("hello", "world"): {"foo": 1}}
-    monkeypatch.setattr(pro_rag, "retrieve", lambda words: [])
+    async def fake_retrieve(words):
+        return []
+
+    monkeypatch.setattr(pro_rag, "retrieve", fake_retrieve)
 
     called = {}
 
@@ -32,7 +35,7 @@ def test_process_message_blends_transformer(tmp_path, monkeypatch):
 
     captured = {}
 
-    def fake_respond(seed_words, vocab=None, **kwargs):
+    async def fake_respond(seed_words, vocab=None, **kwargs):
         captured["seed_words"] = list(seed_words)
         return "ok"
 

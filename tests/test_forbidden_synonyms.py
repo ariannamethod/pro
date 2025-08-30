@@ -31,7 +31,9 @@ def test_forbidden_words_replaced(tmp_path, monkeypatch):
         "baz": {"a": 0.6},
         "qux": {"b": 1.0},
     })
-    sentence = engine.respond(["hello", "world"], forbidden={"hello", "world"})
+    sentence = asyncio.run(
+        engine.respond(["hello", "world"], forbidden={"hello", "world"})
+    )
     assert "hello" not in sentence.lower()
     assert "world" not in sentence.lower()
     assert "hi" in sentence.lower()

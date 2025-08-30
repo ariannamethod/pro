@@ -5,6 +5,7 @@ import sys
 # Allow imports from project root
 sys.path.append(str(pathlib.Path(__file__).resolve().parents[2]))
 from transformers.quantum_attention import QuantumAttention
+from transformers.quantum_memory_attention import QuantumMemoryAttention
 
 
 def test_noise_robustness():
@@ -31,3 +32,23 @@ def test_superposition_learning():
     res = qa.measure(amp, v)
     expected = np.array([[0.5, 0.5]])
     assert np.allclose(res, expected, atol=0.1)
+
+
+class _DummyRetriever:
+    def __init__(self, vec):
+        self.vec = vec
+
+    def retrieve(self, dialogue_id: str, speaker: str) -> np.ndarray:
+        return self.vec
+
+
+def test_memory_key_amplification():
+    """Amplitudes strengthen when memory vector matches a key."""
+
+    q = np.array([[1.0, 0.0]])
+    k = np.array([[1.0, 0.0]])
+    retriever = _DummyRetriever(k[0])
+    qma = QuantumMemoryAttention(retriever)
+    amp_combined = qma.compute_amplitudes(q, k, "d", "s")
+    base_amp = QuantumAttention().compute_amplitudes(q, k)
+    assert np.abs(amp_combined)[0, 0] > np.abs(base_amp)[0, 0]

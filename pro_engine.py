@@ -24,6 +24,7 @@ import pro_rag
 import pro_rag_embedding
 import pro_predict
 import pro_forecast
+import pro_meta
 from pro_identity import swap_pronouns
 from watchfiles import awatch
 
@@ -333,12 +334,24 @@ class ProEngine:
         chaos_factor: Optional[float] = None,
         similarity_threshold: Optional[float] = None,
         forbidden: Optional[Set[str]] = None,
+        update_meta: bool = True,
     ) -> str:
         if not seeds:
             return "Silence echoes within void."
 
+        best = pro_meta.best_params()
+        self.chaos_factor = best.get("chaos_factor", self.chaos_factor)
+        self.similarity_threshold = best.get(
+            "similarity_threshold", self.similarity_threshold
+        )
+
         vocab = vocab or {}
         cf = self.chaos_factor if chaos_factor is None else chaos_factor
+        similarity_threshold = (
+            self.similarity_threshold
+            if similarity_threshold is None
+            else similarity_threshold
+        )
         forbidden = {w.lower() for w in (forbidden or set())}
         analog_map: Dict[str, str] = {}
         for tok in forbidden:
@@ -483,11 +496,7 @@ class ProEngine:
                 else:
                     sim = 0.0
                 scores[word] = sim
-            sim_thresh = (
-                self.similarity_threshold
-                if similarity_threshold is None
-                else similarity_threshold
-            )
+            sim_thresh = similarity_threshold
             eligible = [w for w, s in scores.items() if s < sim_thresh]
             if eligible:
                 ordered2 = sorted(eligible, key=lambda w: scores[w])
@@ -562,6 +571,22 @@ class ProEngine:
                 response = pattern.sub(analog, response)
             if await pro_memory.is_unique(response):
                 await pro_memory.store_response(response)
+                if update_meta:
+                    resp_metrics = await asyncio.to_thread(
+                        compute_metrics,
+                        lowercase(tokenize(response)),
+                        self.state.get("trigram_counts", {}),
+                        self.state.get("bigram_counts", {}),
+                        self.state.get("word_counts", {}),
+                        self.state.get("char_ngram_counts", {}),
+                    )
+                    pro_meta.update(
+                        resp_metrics,
+                        {
+                            "chaos_factor": cf,
+                            "similarity_threshold": similarity_threshold,
+                        },
+                    )
                 return response
             if extra_idx < len(ordered_vocab):
                 attempt_seeds = list(attempt_seeds) + [ordered_vocab[extra_idx]]
@@ -577,7 +602,7 @@ class ProEngine:
             for msg, emb in recent:
                 seeds = tokenize(msg)
                 for _ in range(2):
-                    resp = await self.respond(seeds)
+                    resp = await self.respond(seeds, update_meta=False)
                     new_cands.append((emb, resp))
             for cand in new_cands:
                 self.candidate_buffer.append(cand)
@@ -585,6 +610,11 @@ class ProEngine:
             logging.error("Preparing candidates failed: %s", exc)
 
     async def process_message(self, message: str) -> Tuple[str, Dict]:
+        best = pro_meta.best_params()
+        self.chaos_factor = best.get("chaos_factor", self.chaos_factor)
+        self.similarity_threshold = best.get(
+            "similarity_threshold", self.similarity_threshold
+        )
         original_words = tokenize(message)
         words = lowercase(original_words)
         words = swap_pronouns(words)
@@ -702,10 +732,14 @@ class ProEngine:
                 combined_vocab,
                 chaos_factor=self.chaos_factor,
                 forbidden=user_forbidden,
+                update_meta=False,
             )
         else:
             response = await self.respond(
-                seed_words, combined_vocab, forbidden=user_forbidden
+                seed_words,
+                combined_vocab,
+                forbidden=user_forbidden,
+                update_meta=False,
             )
         try:
             await pro_memory.add_message(response)
@@ -747,6 +781,21 @@ class ProEngine:
         except Exception as exc:  # pragma: no cover - logging side effect
             logging.error("Saving state failed: %s", exc)
         asyncio.create_task(self.prepare_candidates())
+        resp_metrics = await asyncio.to_thread(
+            compute_metrics,
+            lowercase(tokenize(response)),
+            self.state['trigram_counts'],
+            self.state['bigram_counts'],
+            self.state['word_counts'],
+            self.state['char_ngram_counts'],
+        )
+        pro_meta.update(
+            resp_metrics,
+            {
+                "chaos_factor": self.chaos_factor,
+                "similarity_threshold": self.similarity_threshold,
+            },
+        )
         self.log(message, response, metrics)
         return response, metrics
 

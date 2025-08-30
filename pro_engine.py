@@ -202,6 +202,8 @@ class ProEngine:
                 new_hashes['__weights__'] = hashlib.sha256(fh.read()).hexdigest()
         dataset_names: List[str] = []
         for name in os.listdir('datasets'):
+            if name.endswith('.pkl'):
+                continue
             path = os.path.join('datasets', name)
             if not os.path.isfile(path):
                 continue

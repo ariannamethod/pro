@@ -71,6 +71,38 @@ async def tune_with_knowledge(
     return state
 
 
+def merge_specialist(
+    base_state: Dict, specialist_state: Dict, temperature: float = 0.5
+) -> Dict:
+    """Merge ``specialist_state`` into ``base_state`` using a weighted blend.
+
+    Parameters
+    ----------
+    base_state:
+        Original model state to be updated in-place.
+    specialist_state:
+        Fine-tuned specialist whose knowledge should be distilled.
+    temperature:
+        Weighting factor giving preference to the specialist.  ``0.5`` blends
+        both equally, while values closer to ``1.0`` favor the specialist.
+    """
+
+    if specialist_state is None:
+        return base_state
+    weight = float(temperature)
+    for key in [
+        "word_counts",
+        "bigram_counts",
+        "trigram_counts",
+        "char_ngram_counts",
+    ]:
+        base = base_state.setdefault(key, {})
+        spec = specialist_state.get(key, {})
+        for k, v in spec.items():
+            base[k] = base.get(k, 0.0) * (1.0 - weight) + v * weight
+    return base_state
+
+
 def _serialize_state(state: Dict) -> Dict:
     data = dict(state)
     for k in ['word_inv', 'bigram_inv', 'trigram_inv', 'char_ngram_inv']:

@@ -1,4 +1,5 @@
 import numpy as np
+import numpy.typing as npt
 
 
 class ResonantDropout:
@@ -14,14 +15,16 @@ class ResonantDropout:
         self.pos_freq = pos_freq
         self.rng = np.random.default_rng(seed)
 
-    def __call__(self, x: np.ndarray) -> np.ndarray:
+    def __call__(
+        self, x: npt.NDArray[np.complex64]
+    ) -> npt.NDArray[np.complex64]:
         if x.ndim != 2:
             raise ValueError("ResonantDropout expects a 2D array")
         dim = x.shape[1]
         idx = np.arange(dim)
         probs = np.sin(self.pos_freq * idx)
         probs = np.clip(probs, 0.0, 1.0)
-        mask = self.rng.random(dim) >= probs
+        mask = (self.rng.random(dim) >= probs).astype(x.dtype)
         return x * mask
 
 
@@ -36,15 +39,17 @@ class DynamicContextGate:
     def __init__(
         self, dim: int, pos_freq: float = 1.0, seed: int | None = None
     ) -> None:
-        self.bias = np.zeros(dim, dtype=np.float32)
+        self.bias = np.zeros(dim, dtype=np.complex64)
         self.dropout = ResonantDropout(pos_freq, seed)
 
-    def __call__(self, context: np.ndarray) -> np.ndarray:
+    def __call__(
+        self, context: npt.NDArray[np.complex64]
+    ) -> npt.NDArray[np.complex64]:
         """Apply the gating mechanism to *context*."""
         context = self.dropout(context)
         mean_ctx = context.mean(axis=0)
-        gate = 1.0 / (1.0 + np.exp(-(mean_ctx + self.bias)))
-        return context * gate
+        gate = 1.0 / (1.0 + np.exp(-(mean_ctx.real + self.bias.real)))
+        return context * gate.astype(context.dtype)
 
     # Saving/loading helpers -------------------------------------------------
     def state_dict(self) -> dict:
@@ -53,3 +58,34 @@ class DynamicContextGate:
     def load_state_dict(self, state: dict) -> None:
         if "bias" in state:
             self.bias = state["bias"]
+
+
+def amplitude_attention(
+    query: npt.NDArray[np.complex64],
+    key: npt.NDArray[np.complex64],
+) -> npt.NDArray[np.complex64]:
+    """Return amplitude-based attention weights."""
+    scores = (query @ key.conj().T) / np.sqrt(key.shape[-1])
+    return np.abs(scores).astype(np.complex64)
+
+
+def phase_attention(
+    query: npt.NDArray[np.complex64],
+    key: npt.NDArray[np.complex64],
+) -> npt.NDArray[np.complex64]:
+    """Return phase-based attention weights."""
+    scores = (query @ key.conj().T) / np.sqrt(key.shape[-1])
+    return np.exp(1j * np.angle(scores)).astype(np.complex64)
+
+
+def wave_attention(
+    query: npt.NDArray[np.complex64],
+    key: npt.NDArray[np.complex64],
+    value: npt.NDArray[np.complex64],
+) -> npt.NDArray[np.complex64]:
+    """Combine amplitude and phase attention into a complex output."""
+    amp = amplitude_attention(query, key)
+    phase = phase_attention(query, key)
+    weights = amp * phase
+    weights /= weights.sum(axis=-1, keepdims=True)
+    return weights @ value

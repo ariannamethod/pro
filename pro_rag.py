@@ -51,3 +51,37 @@ async def retrieve(query_words: List[str], limit: int = 5) -> List[str]:
     graph_context = await pro_memory.fetch_related_concepts(qwords)
     combined = graph_context + [m for _, m in scored]
     return combined[:limit]
+
+
+# ---------------------------------------------------------------------------
+# Training demo
+def _demo_training() -> None:
+    """Small demonstration of online updates for ``ReinforceRetriever``.
+
+    The demo sets up a tiny dialogue with two memories and repeatedly queries
+    the retriever.  Rewards favour the memory mentioning "pizza" which nudges
+    the policy weights toward that node over time.  The printed output shows the
+    chosen memory and resulting reward for each step.
+    """
+
+    from memory import MemoryGraphStore, ReinforceRetriever
+
+    store = MemoryGraphStore()
+    did = "demo"
+    store.add_utterance(did, "user", "hello world")
+    store.add_utterance(did, "user", "pizza is tasty")
+    retriever = ReinforceRetriever(store)
+
+    for step in range(5):
+        vec = retriever.retrieve(did, "user")
+        # Determine reward based on which message was sampled
+        messages = [n.text for n in store.get_dialogue(did) if n.speaker == "user"]
+        idx = retriever._last[2] if retriever._last else 0
+        text = messages[idx]
+        reward = 1.0 if "pizza" in text else -1.0
+        retriever.update(reward)
+        print(f"step {step}: chose {text!r} reward={reward}")
+
+
+if __name__ == "__main__":
+    _demo_training()

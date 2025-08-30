@@ -1,4 +1,4 @@
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 import asyncio
 import math
@@ -7,6 +7,7 @@ from urllib import request, parse
 
 from pro_metrics import tokenize, lowercase
 import pro_memory
+from memory.memory_lattice import MemoryGraphStore
 import pro_predict
 
 
@@ -66,33 +67,61 @@ async def retrieve(
     limit: int = 5,
     external_source: str | None = None,
     external_limit: int = 3,
+    lattice: Optional[MemoryGraphStore] = None,
 ) -> List[str]:
-    """Retrieve context combining messages, concepts and external knowledge."""
+    """Retrieve context using graph links and embedding similarity."""
+
     await asyncio.to_thread(pro_predict._ensure_vectors)
-    messages = await pro_memory.fetch_recent_messages(50)
     qwords = lowercase(query_words)
-    qset = set(qwords)
     qvec = _sentence_vector(qwords)
-    scored = []
-    for msg, _ in messages:
-        words = lowercase(tokenize(msg))
-        word_score = len(qset.intersection(words))
-        mvec = _sentence_vector(words)
-        if qvec and mvec:
-            score = word_score + _cosine(qvec, mvec)
-        else:
-            score = word_score
-        if score > 0:
-            scored.append((score, msg))
-    scored.sort(reverse=True)
+    scored: List[tuple[float, str]] = []
+
+    if lattice is not None:
+        # Use embeddings stored in the lattice and include neighbouring nodes
+        for did, nodes in lattice.graph.items():
+            for idx, node in enumerate(nodes):
+                sim = _cosine(qvec, node.embedding) if qvec else 0.0
+                if sim <= 0:
+                    continue
+                scored.append((sim, node.text))
+                # incorporate structural neighbours from the dialogue graph
+                if idx > 0:
+                    scored.append((sim * 0.5, nodes[idx - 1].text))
+                if idx + 1 < len(nodes):
+                    scored.append((sim * 0.5, nodes[idx + 1].text))
+        scored.sort(key=lambda x: x[0], reverse=True)
+    else:
+        # Fall back to recent messages from the database
+        messages = await pro_memory.fetch_recent_messages(50)
+        qset = set(qwords)
+        for msg, _ in messages:
+            words = lowercase(tokenize(msg))
+            word_score = len(qset.intersection(words))
+            mvec = _sentence_vector(words)
+            score = word_score + (_cosine(qvec, mvec) if qvec and mvec else 0)
+            if score > 0:
+                scored.append((score, msg))
+        scored.sort(key=lambda x: x[0], reverse=True)
+
     graph_context = await pro_memory.fetch_related_concepts(qwords)
     external: List[str] = []
     if external_source:
         external = await retrieve_external(
             " ".join(qwords), external_source, external_limit
         )
+
     combined = external + graph_context + [m for _, m in scored]
-    return combined[:limit]
+    # Deduplicate while preserving order
+    seen = set()
+    result: List[str] = []
+    for msg in combined:
+        if msg in seen:
+            continue
+        seen.add(msg)
+        result.append(msg)
+        if len(result) >= limit:
+            break
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -116,7 +145,7 @@ def _demo_training() -> None:
     retriever = ReinforceRetriever(store)
 
     for step in range(5):
-        vec = retriever.retrieve(did, "user")
+        retriever.retrieve(did, "user")
         # Determine reward based on which message was sampled
         messages = [
             n.text for n in store.get_dialogue(did) if n.speaker == "user"

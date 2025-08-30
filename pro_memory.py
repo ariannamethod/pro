@@ -1,6 +1,6 @@
 import asyncio
 import atexit
-from typing import List, Tuple
+from typing import Dict, List, Tuple
 
 import numpy as np
 import pro_rag_embedding
@@ -11,6 +11,7 @@ DB_PATH = 'pro_memory.db'
 
 _VECTORS: np.ndarray | None = None
 _MESSAGES: List[str] = []
+_ADAPTER_USAGE: Dict[str, int] = {}
 
 
 async def init_db() -> None:
@@ -66,6 +67,37 @@ async def build_index() -> None:
 async def close_db() -> None:
     """Close all connections in the pool."""
     await close_pool()
+
+
+async def increment_adapter_usage(name: str) -> None:
+    """Increment usage counter for a specific adapter."""
+    _ADAPTER_USAGE[name] = _ADAPTER_USAGE.get(name, 0) + 1
+    async with get_connection() as conn:
+        await asyncio.to_thread(
+            conn.execute,
+            "INSERT INTO adapter_usage(adapter, count) VALUES (?, 1) "
+            "ON CONFLICT(adapter) DO UPDATE SET count = count + 1",
+            (name,),
+        )
+        await asyncio.to_thread(conn.commit)
+
+
+async def total_adapter_usage() -> int:
+    """Return the total number of adapter usages recorded."""
+    async with get_connection() as conn:
+        cur = await asyncio.to_thread(
+            conn.execute, "SELECT SUM(count) FROM adapter_usage"
+        )
+        row = await asyncio.to_thread(cur.fetchone)
+    return int(row[0] or 0)
+
+
+async def reset_adapter_usage() -> None:
+    """Clear all adapter usage counters."""
+    _ADAPTER_USAGE.clear()
+    async with get_connection() as conn:
+        await asyncio.to_thread(conn.execute, "DELETE FROM adapter_usage")
+        await asyncio.to_thread(conn.commit)
 
 
 atexit.register(lambda: asyncio.run(close_db()))

@@ -81,8 +81,8 @@ def test_async_tune_logs_and_saves(tmp_path, monkeypatch):
 
     trained = []
 
-    def fake_train(state, path, weight):
-        trained.append((path, weight))
+    def fake_train(state, path, weight, adapters=None):
+        trained.append((path, weight, adapters))
 
     monkeypatch.setattr(pro_tune, "train_weighted", fake_train)
 
@@ -102,7 +102,7 @@ def test_async_tune_logs_and_saves(tmp_path, monkeypatch):
 
     asyncio.run(engine._async_tune([str(data_file)]))
 
-    assert trained == [(str(data_file), 2)]
+    assert trained == [(str(data_file), 2, [])]
     assert saved
     assert any("sample.txt" in entry for entry in logs)
 
@@ -122,7 +122,7 @@ def test_async_tune_runs_concurrently(tmp_path, monkeypatch):
     max_running = 0
     lock = threading.Lock()
 
-    def fake_train(state, path, weight):
+    def fake_train(state, path, weight, adapters=None):
         nonlocal running, max_running
         with lock:
             running += 1

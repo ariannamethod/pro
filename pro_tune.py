@@ -8,13 +8,16 @@ from typing import Dict
 from pro_metrics import tokenize, lowercase
 import pro_sequence
 import pro_predict
+import pro_memory
 from pro_rag import retrieve_external
 
 STATE_PATH = 'pro_state.json'
 _SEP = '\u0001'
 
 
-def train_weighted(state: Dict, dataset_path: str, weight: float) -> Dict:
+def train_weighted(
+    state: Dict, dataset_path: str, weight: float, adapters: list[str] | None = None
+) -> Dict:
     if weight <= 0:
         logging.warning(
             "Non-positive weight %s for %s; skipping", weight, dataset_path
@@ -35,12 +38,20 @@ def train_weighted(state: Dict, dataset_path: str, weight: float) -> Dict:
     words = lowercase(tokenize(text))
     pro_sequence.analyze_sequences(state, words, weight=weight)
     asyncio.run(pro_predict.update(words))
+    if adapters:
+        for name in adapters:
+            try:
+                asyncio.run(pro_memory.increment_adapter_usage(name))
+            except Exception:
+                pass
     pro_predict.save_embeddings(pro_predict._GRAPH, pro_predict._VECTORS)
     return state
 
 
-def train(state: Dict, dataset_path: str) -> Dict:
-    return train_weighted(state, dataset_path, 1.0)
+def train(
+    state: Dict, dataset_path: str, adapters: list[str] | None = None
+) -> Dict:
+    return train_weighted(state, dataset_path, 1.0, adapters)
 
 
 async def tune_with_knowledge(

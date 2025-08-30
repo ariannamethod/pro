@@ -2,6 +2,8 @@ from typing import Dict, List
 
 import asyncio
 import math
+import json
+from urllib import request, parse
 
 from pro_metrics import tokenize, lowercase
 import pro_memory
@@ -29,8 +31,43 @@ def _cosine(a: Dict[str, float], b: Dict[str, float]) -> float:
     return dot / (norm_a * norm_b)
 
 
-async def retrieve(query_words: List[str], limit: int = 5) -> List[str]:
-    """Retrieve context combining messages and concept relations."""
+def _external_search_sync(query: str, source: str, limit: int) -> List[str]:
+    """Perform a blocking search against an external knowledge source."""
+    if not query:
+        return []
+    if source == "wikipedia":
+        url = "https://en.wikipedia.org/w/api.php?" + parse.urlencode(
+            {
+                "action": "opensearch",
+                "search": query,
+                "limit": str(limit),
+                "namespace": "0",
+                "format": "json",
+            }
+        )
+        try:
+            with request.urlopen(url, timeout=5) as resp:
+                data = json.load(resp)
+            return [d for d in data[2] if d]
+        except Exception:
+            return []
+    return []
+
+
+async def retrieve_external(
+    query: str, source: str = "wikipedia", limit: int = 3
+) -> List[str]:
+    """Asynchronously retrieve information from an external storage."""
+    return await asyncio.to_thread(_external_search_sync, query, source, limit)
+
+
+async def retrieve(
+    query_words: List[str],
+    limit: int = 5,
+    external_source: str | None = None,
+    external_limit: int = 3,
+) -> List[str]:
+    """Retrieve context combining messages, concepts and external knowledge."""
     await asyncio.to_thread(pro_predict._ensure_vectors)
     messages = await pro_memory.fetch_recent_messages(50)
     qwords = lowercase(query_words)
@@ -49,7 +86,12 @@ async def retrieve(query_words: List[str], limit: int = 5) -> List[str]:
             scored.append((score, msg))
     scored.sort(reverse=True)
     graph_context = await pro_memory.fetch_related_concepts(qwords)
-    combined = graph_context + [m for _, m in scored]
+    external: List[str] = []
+    if external_source:
+        external = await retrieve_external(
+            " ".join(qwords), external_source, external_limit
+        )
+    combined = external + graph_context + [m for _, m in scored]
     return combined[:limit]
 
 
@@ -58,10 +100,11 @@ async def retrieve(query_words: List[str], limit: int = 5) -> List[str]:
 def _demo_training() -> None:
     """Small demonstration of online updates for ``ReinforceRetriever``.
 
-    The demo sets up a tiny dialogue with two memories and repeatedly queries
-    the retriever.  Rewards favour the memory mentioning "pizza" which nudges
-    the policy weights toward that node over time.  The printed output shows the
-    chosen memory and resulting reward for each step.
+    The demo sets up a tiny dialogue with two memories and repeatedly
+    queries the retriever. Rewards favour the memory mentioning "pizza"
+    which nudges the policy weights toward that node over time. The
+    printed output shows the chosen memory and resulting reward for each
+    step.
     """
 
     from memory import MemoryGraphStore, ReinforceRetriever
@@ -75,7 +118,9 @@ def _demo_training() -> None:
     for step in range(5):
         vec = retriever.retrieve(did, "user")
         # Determine reward based on which message was sampled
-        messages = [n.text for n in store.get_dialogue(did) if n.speaker == "user"]
+        messages = [
+            n.text for n in store.get_dialogue(did) if n.speaker == "user"
+        ]
         idx = retriever._last[2] if retriever._last else 0
         text = messages[idx]
         reward = 1.0 if "pizza" in text else -1.0

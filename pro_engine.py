@@ -161,6 +161,11 @@ class ProEngine:
                 old_hashes = json.load(fh)
         new_hashes: Dict[str, str] = {}
         changed_files: List[str] = []
+        weights_path = 'dataset_weights.json'
+        if os.path.exists(weights_path):
+            with open(weights_path, 'rb') as fh:
+                new_hashes['__weights__'] = hashlib.sha256(fh.read()).hexdigest()
+        dataset_names: List[str] = []
         for name in os.listdir('datasets'):
             path = os.path.join('datasets', name)
             if not os.path.isfile(path):
@@ -168,18 +173,18 @@ class ProEngine:
             with open(path, 'rb') as fh:
                 digest = hashlib.sha256(fh.read()).hexdigest()
             new_hashes[name] = digest
+            dataset_names.append(name)
             if old_hashes.get(name) != digest:
                 changed_files.append(path)
         removed = set(old_hashes) - set(new_hashes)
+        weight_changed = old_hashes.get('__weights__') != new_hashes.get('__weights__')
         if removed and not new_hashes:
             with open(HASH_PATH, 'w', encoding='utf-8') as fh:
                 json.dump(new_hashes, fh)
             await self.dataset_queue.put(None)
             return
-        if removed:
-            changed_files = [
-                os.path.join('datasets', n) for n in new_hashes.keys()
-            ]
+        if removed or weight_changed:
+            changed_files = [os.path.join('datasets', n) for n in dataset_names]
         with open(HASH_PATH, 'w', encoding='utf-8') as fh:
             json.dump(new_hashes, fh)
         for path in changed_files:
@@ -187,11 +192,21 @@ class ProEngine:
 
     async def _async_tune(self, paths: List[str]) -> None:
         tuned: List[str] = []
+        weights: Dict[str, float] = {}
+        if os.path.exists('dataset_weights.json'):
+            try:
+                with open('dataset_weights.json', 'r', encoding='utf-8') as fh:
+                    weights = json.load(fh)
+            except Exception as exc:  # pragma: no cover - logging side effect
+                logging.error("Loading dataset weights failed: %s", exc)
 
         async def tune_path(path: str) -> None:
             async with self._tune_semaphore:
                 try:
-                    await asyncio.to_thread(pro_tune.train, self.state, path)
+                    weight = float(weights.get(os.path.basename(path), 1.0))
+                    await asyncio.to_thread(
+                        pro_tune.train_weighted, self.state, path, weight
+                    )
                     tuned.append(os.path.basename(path))
                 except Exception as exc:  # pragma: no cover - logging side effect
                     logging.error("Tuning failed for %s: %s", path, exc)

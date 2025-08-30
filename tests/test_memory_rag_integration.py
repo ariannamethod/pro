@@ -18,7 +18,7 @@ def engine(monkeypatch):
     for path in [pro_memory.DB_PATH, "pro_state.json", "dataset_sha.json"]:
         if os.path.exists(path):
             os.remove(path)
-    monkeypatch.setattr(pro_tune, "train", lambda *a, **k: None)
+    monkeypatch.setattr(pro_tune, "train_weighted", lambda *a, **k: None)
     eng = ProEngine()
     asyncio.run(eng.setup())
     return eng

@@ -1,39 +1,49 @@
-import sqlite3
 import asyncio
+import atexit
+import sqlite3
 from typing import List, Tuple
 
+import aiosqlite
+
 DB_PATH = 'pro_memory.db'
+_CONN: aiosqlite.Connection | None = None
 
 
 async def init_db() -> None:
-    """Initialize sqlite database."""
+    """Initialize sqlite database and create a global connection."""
 
-    def _setup() -> None:
-        conn = sqlite3.connect(DB_PATH)
-        cur = conn.cursor()
-        cur.execute(
-            "CREATE TABLE IF NOT EXISTS messages("  # noqa: E501
-            "id INTEGER PRIMARY KEY AUTOINCREMENT, content TEXT)"
-        )
-        cur.execute(
-            "CREATE TABLE IF NOT EXISTS responses("  # noqa: E501
-            "id INTEGER PRIMARY KEY AUTOINCREMENT, content TEXT)"
-        )
-        conn.commit()
-        conn.close()
+    global _CONN
+    _CONN = await aiosqlite.connect(DB_PATH)
+    await _CONN.execute(
+        "CREATE TABLE IF NOT EXISTS messages("  # noqa: E501
+        "id INTEGER PRIMARY KEY AUTOINCREMENT, content TEXT)"
+    )
+    await _CONN.execute(
+        "CREATE TABLE IF NOT EXISTS responses("  # noqa: E501
+        "id INTEGER PRIMARY KEY AUTOINCREMENT, content TEXT)"
+    )
+    await _CONN.commit()
 
-    await asyncio.to_thread(_setup)
+
+async def close_db() -> None:
+    """Close the global database connection."""
+
+    global _CONN
+    if _CONN is not None:
+        await _CONN.close()
+        _CONN = None
+
+
+atexit.register(lambda: asyncio.run(close_db()))
 
 
 async def add_message(content: str) -> None:
     """Store a message asynchronously."""
-    def _write():
-        conn = sqlite3.connect(DB_PATH)
-        cur = conn.cursor()
-        cur.execute('INSERT INTO messages(content) VALUES (?)', (content,))
-        conn.commit()
-        conn.close()
-    await asyncio.to_thread(_write)
+
+    if _CONN is None:
+        raise RuntimeError('Database not initialized')
+    await _CONN.execute('INSERT INTO messages(content) VALUES (?)', (content,))
+    await _CONN.commit()
 
 
 def is_unique(sentence: str) -> bool:
@@ -49,34 +59,38 @@ def is_unique(sentence: str) -> bool:
     return exists is None
 
 
+async def _store_response(sentence: str) -> None:
+    if _CONN is None:
+        raise RuntimeError('Database not initialized')
+    await _CONN.execute('INSERT INTO responses(content) VALUES (?)', (sentence,))
+    await _CONN.commit()
+
+
 def store_response(sentence: str) -> None:
-    """Persist a generated response synchronously."""
-    conn = sqlite3.connect(DB_PATH)
-    cur = conn.cursor()
-    cur.execute('INSERT INTO responses(content) VALUES (?)', (sentence,))
-    conn.commit()
-    conn.close()
+    """Persist a generated response."""
+
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        asyncio.run(_store_response(sentence))
+    else:
+        loop.create_task(_store_response(sentence))
 
 
 async def fetch_recent(limit: int = 5) -> Tuple[List[str], List[str]]:
     """Fetch recent messages and responses for context."""
 
-    def _read() -> Tuple[List[str], List[str]]:
-        conn = sqlite3.connect(DB_PATH)
-        cur = conn.cursor()
-        cur.execute(
-            'SELECT content FROM messages ORDER BY id DESC LIMIT ?',
-            (limit,),
-        )
-        msg_rows = cur.fetchall()
-        cur.execute(
-            'SELECT content FROM responses ORDER BY id DESC LIMIT ?',
-            (limit,),
-        )
-        resp_rows = cur.fetchall()
-        conn.close()
-        messages = [r[0] for r in msg_rows][::-1]
-        responses = [r[0] for r in resp_rows][::-1]
-        return messages, responses
+    if _CONN is None:
+        raise RuntimeError('Database not initialized')
 
-    return await asyncio.to_thread(_read)
+    async with _CONN.execute(
+        'SELECT content FROM messages ORDER BY id DESC LIMIT ?', (limit,)
+    ) as cur:
+        msg_rows = await cur.fetchall()
+    async with _CONN.execute(
+        'SELECT content FROM responses ORDER BY id DESC LIMIT ?', (limit,)
+    ) as cur:
+        resp_rows = await cur.fetchall()
+    messages = [r[0] for r in msg_rows][::-1]
+    responses = [r[0] for r in resp_rows][::-1]
+    return messages, responses

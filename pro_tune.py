@@ -1,6 +1,6 @@
-import argparse
-import json
 import logging
+import json
+import argparse
 import os
 from typing import Dict
 
@@ -13,12 +13,16 @@ _SEP = '\u0001'
 
 def train(state: Dict, dataset_path: str) -> Dict:
     if not os.path.exists(dataset_path):
-        logging.warning("Dataset path %s does not exist; skipping training", dataset_path)
+        logging.warning(
+            "Dataset path %s does not exist; skipping training", dataset_path
+        )
         return state
     with open(dataset_path, 'r', encoding='utf-8') as fh:
         text = fh.read()
     if not text:
-        logging.warning("Dataset path %s is empty; skipping training", dataset_path)
+        logging.warning(
+            "Dataset path %s is empty; skipping training", dataset_path
+        )
         return state
     words = lowercase(tokenize(text))
     pro_sequence.analyze_sequences(state, words)

@@ -1,4 +1,5 @@
 import asyncio
+import os
 import pro_engine
 import pro_memory
 import pro_predict
@@ -6,6 +7,9 @@ import pro_rag
 
 
 def test_predict_learns_new_words(tmp_path, monkeypatch):
+    for path in ["datasets/conversation.log", "datasets/embeddings.pkl"]:
+        if os.path.exists(path):
+            os.remove(path)
     db_path = tmp_path / "mem.db"
     monkeypatch.setattr(pro_memory, "DB_PATH", str(db_path))
     asyncio.run(pro_memory.init_db())

@@ -38,6 +38,20 @@ async def persist_embedding(
         await asyncio.to_thread(conn.commit)
 
 
+async def persist_learned_vector(index: int, embedding: np.ndarray) -> None:
+    """Persist an updated embedding for an existing message."""
+
+    async with get_connection() as conn:
+        await asyncio.to_thread(
+            conn.execute,
+            "UPDATE messages SET embedding = ? WHERE rowid = ?",
+            (embedding.tobytes(), index + 1),
+        )
+        await asyncio.to_thread(conn.commit)
+    if _VECTORS is not None and index < _VECTORS.shape[0]:
+        _VECTORS[index] = embedding
+
+
 def _add_to_index(content: str, embedding: np.ndarray) -> None:
     """Add a vector to the in-memory search index."""
     global _VECTORS

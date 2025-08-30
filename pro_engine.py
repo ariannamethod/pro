@@ -23,6 +23,7 @@ import pro_memory
 import pro_rag
 import pro_rag_embedding
 import pro_predict
+import pro_forecast
 from pro_identity import swap_pronouns
 from watchfiles import awatch
 
@@ -48,6 +49,7 @@ class ProEngine:
         self.chaos_factor = chaos_factor
         self.similarity_threshold = similarity_threshold
         self.candidate_buffer: deque = deque(maxlen=20)
+        self.last_forecast: Optional[Dict] = None
 
     async def setup(self) -> None:
         pro_predict._GRAPH = {}
@@ -184,6 +186,41 @@ class ProEngine:
             charges[w] = freq * (1 + successors)
         ordered = sorted(charges, key=charges.get, reverse=True)
         return ordered[:5]
+
+    async def _forecast(self, seeds: List[str], depth: int = 2) -> None:
+        """Generate a forecast tree of possible responses.
+
+        The simulation explores continuations using :class:`MiniSelfAttention`
+        and records the branch where entropy and resonance are closest.
+        The result is stored in ``self.last_forecast``.
+        """
+
+        def _collect(node: pro_forecast.ForecastNode) -> List[pro_forecast.ForecastNode]:
+            if not node.children:
+                return [node]
+            leaves: List[pro_forecast.ForecastNode] = []
+            for child in node.children:
+                leaves.extend(_collect(child))
+            return leaves
+
+        tree = await asyncio.to_thread(pro_forecast.simulate_paths, seeds, depth)
+        leaves = _collect(tree)
+        best = None
+        best_score = -float("inf")
+        for leaf in leaves:
+            tokens = leaf.text.split()
+            metrics = compute_metrics(
+                tokens,
+                self.state.get("trigram_counts", {}),
+                self.state.get("bigram_counts", {}),
+                self.state.get("word_counts", {}),
+                self.state.get("char_ngram_counts", {}),
+            )
+            score = -abs(metrics.get("entropy", 0.0) - metrics.get("resonance", 0.0))
+            if score > best_score:
+                best = {"text": leaf.text, "prob": leaf.prob, "novelty": leaf.novelty}
+                best_score = score
+        self.last_forecast = best
 
     def predict_next_word(self, prev2: str, prev1: str) -> str:
         tc = self.state.get("trigram_counts", {})
@@ -333,6 +370,7 @@ class ProEngine:
             elif w and w[0].isupper():
                 repl = repl[0].upper() + repl[1:]
             attempt_seeds.append(repl)
+        asyncio.create_task(self._forecast(attempt_seeds))
         extra_idx = 0
         while True:
             # ----- First sentence -----

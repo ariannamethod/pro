@@ -5,7 +5,7 @@ import hashlib
 from typing import List
 from urllib import request
 
-DEFAULT_URL = os.getenv("VECTOR_STORE_URL", "http://localhost:8000")
+DEFAULT_URL = os.getenv("VECTOR_STORE_URL")
 
 async def upsert(text: str, embedding: List[float], base_url: str | None = None) -> None:
     """Store ``embedding`` for ``text`` in the external vector store.
@@ -14,7 +14,11 @@ async def upsert(text: str, embedding: List[float], base_url: str | None = None)
     endpoint accepting ``{"id": str, "embedding": List[float], "text": str}``.
     The call is executed in a thread to avoid blocking the event loop.
     """
-    url = f"{base_url or DEFAULT_URL}/upsert"
+    base_url = base_url or DEFAULT_URL
+    if not base_url:
+        return
+
+    url = f"{base_url}/upsert"
     payload = json.dumps({
         "id": hashlib.sha1(text.encode("utf-8")).hexdigest(),
         "embedding": embedding,
@@ -30,7 +34,11 @@ async def upsert(text: str, embedding: List[float], base_url: str | None = None)
 
 async def query(embedding: List[float], top_k: int = 5, base_url: str | None = None) -> List[str]:
     """Return texts most similar to ``embedding`` from the external store."""
-    url = f"{base_url or DEFAULT_URL}/query"
+    base_url = base_url or DEFAULT_URL
+    if not base_url:
+        return []
+
+    url = f"{base_url}/query"
     payload = json.dumps({"embedding": embedding, "top_k": top_k}).encode("utf-8")
 
     def _request() -> List[str]:

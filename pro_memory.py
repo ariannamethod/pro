@@ -2,6 +2,8 @@ import asyncio
 import atexit
 from typing import List, Tuple
 
+import numpy as np
+import pro_rag_embedding
 from pro_memory_pool import init_pool, close_pool, get_connection
 
 DB_PATH = 'pro_memory.db'
@@ -21,10 +23,13 @@ atexit.register(lambda: asyncio.run(close_db()))
 
 
 async def add_message(content: str) -> None:
-    """Store a message asynchronously."""
+    """Store a message and its embedding asynchronously."""
+    embedding = await pro_rag_embedding.embed_sentence(content)
     async with get_connection() as conn:
         await asyncio.to_thread(
-            conn.execute, 'INSERT INTO messages(content) VALUES (?)', (content,)
+            conn.execute,
+            'INSERT INTO messages(content, embedding) VALUES (?, ?)',
+            (content, embedding.tobytes()),
         )
         await asyncio.to_thread(conn.commit)
 
@@ -68,3 +73,18 @@ async def fetch_recent(limit: int = 5) -> Tuple[List[str], List[str]]:
     messages = [r[0] for r in msg_rows][::-1]
     responses = [r[0] for r in resp_rows][::-1]
     return messages, responses
+
+
+async def fetch_recent_messages(limit: int = 50) -> List[Tuple[str, np.ndarray]]:
+    """Fetch recent messages with embeddings."""
+    async with get_connection() as conn:
+        cur = await asyncio.to_thread(
+            conn.execute,
+            'SELECT content, embedding FROM messages ORDER BY id DESC LIMIT ?',
+            (limit,),
+        )
+        rows = await asyncio.to_thread(cur.fetchall)
+    messages = [
+        (r[0], np.frombuffer(r[1], dtype=np.float32)) for r in rows
+    ][::-1]
+    return messages

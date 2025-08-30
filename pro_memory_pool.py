@@ -22,12 +22,17 @@ async def init_pool(db_path: str, size: int = 1) -> None:
         conn = _POOL[0]
         conn.execute(
             "CREATE TABLE IF NOT EXISTS messages("  # noqa: E501
-            "id INTEGER PRIMARY KEY AUTOINCREMENT, content TEXT)"
+            "id INTEGER PRIMARY KEY AUTOINCREMENT, content TEXT, embedding BLOB)"
         )
         conn.execute(
             "CREATE TABLE IF NOT EXISTS responses("  # noqa: E501
             "id INTEGER PRIMARY KEY AUTOINCREMENT, content TEXT)"
         )
+        # Ensure embedding column exists for pre-existing databases
+        try:
+            conn.execute("ALTER TABLE messages ADD COLUMN embedding BLOB")
+        except sqlite3.OperationalError:
+            pass
         conn.commit()
 
 

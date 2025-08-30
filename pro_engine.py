@@ -5,6 +5,7 @@ import hashlib
 import asyncio
 import math
 import random
+import re
 from typing import Dict, List, Tuple, Set, Optional
 from collections import Counter
 
@@ -280,20 +281,42 @@ class ProEngine:
         vocab: Optional[Dict[str, int]] = None,
         chaos_factor: Optional[float] = None,
         similarity_threshold: Optional[float] = None,
+        forbidden: Optional[Set[str]] = None,
     ) -> str:
         if not seeds:
             return "Silence echoes within void."
 
         vocab = vocab or {}
         cf = self.chaos_factor if chaos_factor is None else chaos_factor
-        ordered_vocab = [
-            w
-            for w, _ in sorted(
-                vocab.items(), key=lambda x: x[1], reverse=True
-            )
-        ]
+        forbidden = {w.lower() for w in (forbidden or set())}
+        analog_map: Dict[str, str] = {}
+        for tok in forbidden:
+            suggestions = pro_predict.suggest(tok, topn=1)
+            analog = suggestions[0] if suggestions else None
+            if not analog:
+                analog = pro_predict.lookup_analogs(tok)
+            if analog:
+                analog_map[tok] = analog
+        ordered_vocab: List[str] = []
+        seen_vocab: Set[str] = set()
+        for w, _ in sorted(vocab.items(), key=lambda x: x[1], reverse=True):
+            lw = w.lower()
+            if lw in forbidden and lw not in analog_map:
+                continue
+            repl = analog_map.get(lw, w)
+            if repl not in seen_vocab:
+                ordered_vocab.append(repl)
+                seen_vocab.add(repl)
 
-        attempt_seeds = list(seeds)
+        attempt_seeds: List[str] = []
+        for w in seeds:
+            lw = w.lower()
+            repl = analog_map.get(lw, w)
+            if w.isupper():
+                repl = repl.upper()
+            elif w and w[0].isupper():
+                repl = repl[0].upper() + repl[1:]
+            attempt_seeds.append(repl)
         extra_idx = 0
         while True:
             # ----- First sentence -----
@@ -332,12 +355,16 @@ class ProEngine:
                     analog = analog.upper()
                 elif w and w[0].isupper():
                     analog = analog[0].upper() + analog[1:]
-                if analog and analog not in tracker:
+                if analog and analog.lower() not in forbidden and analog not in tracker:
                     words.append(analog)
                     tracker.add(analog)
             word_counts = self.state.get("word_counts", {})
             combined_counts: Dict[str, float] = dict(word_counts)
             for w, weight in vocab.items():
+                lw = w.lower()
+                if lw in forbidden and lw not in analog_map:
+                    continue
+                w = analog_map.get(lw, w)
                 combined_counts[w] = combined_counts.get(w, 0) + weight
             for w in high_inv_words:
                 analog = pro_predict.lookup_analogs(w)
@@ -355,12 +382,17 @@ class ProEngine:
             for w in ordered:
                 if len(words) >= 2:
                     break
-                if w and w not in tracker:
+                if w and w.lower() not in forbidden and w not in tracker:
                     words.append(w)
                     tracker.add(w)
             while len(words) < 2:
                 words.append("")
-            words = self.plan_sentence(words, target_length, chaos_factor=cf)
+            words = self.plan_sentence(
+                words,
+                target_length,
+                forbidden=forbidden,
+                chaos_factor=cf,
+            )
             first = words[0]
             if first and first[0].isalpha():
                 first = first[0].upper() + first[1:]
@@ -426,7 +458,7 @@ class ProEngine:
             words2 = self.plan_sentence(
                 second_seeds + ordered,
                 target_length2,
-                forbidden=set(first_words),
+                forbidden=set(first_words) | forbidden,
                 chaos_factor=cf,
             )
             first2 = words2[0]
@@ -455,11 +487,14 @@ class ProEngine:
                 sentence2 = " ".join(parts2) + "."
 
             response = sentence1 + " " + sentence2
+            for tok, analog in analog_map.items():
+                pattern = re.compile(rf"\b{re.escape(tok)}\b", re.IGNORECASE)
+                response = pattern.sub(analog, response)
             if pro_memory.is_unique(response):
                 pro_memory.store_response(response)
                 return response
             if extra_idx < len(ordered_vocab):
-                attempt_seeds = list(seeds) + [ordered_vocab[extra_idx]]
+                attempt_seeds = list(attempt_seeds) + [ordered_vocab[extra_idx]]
             else:
                 attempt_seeds = list(seeds) + [f"alt{extra_idx}"]
             extra_idx += 1
@@ -468,6 +503,7 @@ class ProEngine:
         original_words = tokenize(message)
         words = lowercase(original_words)
         words = swap_pronouns(words)
+        user_forbidden = set(words)
         unknown: List[str] = [
             w for w in words if w not in self.state['word_counts']
         ]
@@ -538,10 +574,15 @@ class ProEngine:
             combined_vocab[w] = weight
         if self.chaos_factor:
             response = self.respond(
-                seed_words, combined_vocab, chaos_factor=self.chaos_factor
+                seed_words,
+                combined_vocab,
+                chaos_factor=self.chaos_factor,
+                forbidden=user_forbidden,
             )
         else:
-            response = self.respond(seed_words, combined_vocab)
+            response = self.respond(
+                seed_words, combined_vocab, forbidden=user_forbidden
+            )
         try:
             await pro_memory.add_message(response)
         except Exception as exc:  # pragma: no cover - logging side effect

@@ -15,7 +15,7 @@ def test_predict_learns_new_words(tmp_path, monkeypatch):
     monkeypatch.setattr(
         pro_engine.ProEngine,
         "respond",
-        lambda self, seeds, vocab=None: "music",
+        lambda self, seeds, vocab=None, **kwargs: "music",
     )
 
     async def dummy_retrieve(words, limit=5):

@@ -9,6 +9,7 @@ sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 import pro_memory  # noqa: E402
 import pro_rag  # noqa: E402
 import pro_sequence  # noqa: E402
+import pro_predict  # noqa: E402
 from pro_engine import ProEngine  # noqa: E402
 
 
@@ -34,19 +35,40 @@ def engine(monkeypatch):
 
     monkeypatch.setattr(pro_sequence, "analyze_sequences", noop)
 
+    mapping = {
+        "hello": ["hi"],
+        "world": ["globe"],
+        "friend": ["buddy"],
+        "nasa": ["space"],
+        "launches": ["starts"],
+        "rockets": ["missiles"],
+        "iphone": ["smartphone"],
+        "release": ["launch"],
+        "soon": ["shortly"],
+    }
+
+    monkeypatch.setattr(
+        pro_predict, "suggest", lambda w, topn=3, _m=mapping: _m.get(w.lower(), [])
+    )
+    monkeypatch.setattr(pro_predict, "lookup_analogs", lambda w: None)
+    monkeypatch.setattr(pro_predict, "_VECTORS", {"foo": {"a": 1.0}})
+
     return engine
 
 
 def test_preserves_uppercase_mid_sentence(engine):
     response, _ = asyncio.run(engine.process_message("hello WORLD friend"))
-    assert "WORLD" in response.split()[1:]
+    assert "GLOBE" in response.split()[1:]
+    assert "WORLD" not in response
 
 
 def test_acronym_first_word(engine):
     response, _ = asyncio.run(engine.process_message("NASA launches rockets"))
-    assert response.split()[0] == "NASA"
+    assert response.split()[0] == "SPACE"
+    assert "NASA" not in response
 
 
 def test_mixed_case_first_word(engine):
     response, _ = asyncio.run(engine.process_message("iPhone release soon"))
-    assert response.split()[0] == "IPhone"
+    assert response.split()[0] == "Smartphone"
+    assert "iPhone" not in response

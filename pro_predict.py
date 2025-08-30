@@ -92,6 +92,9 @@ def suggest(word: str, topn: int = 3) -> List[str]:
     fuzzy string match against the vocabulary is performed.
     """
     _ensure_vectors()
+    neighbours = _GRAPH.get(word)
+    if neighbours:
+        return [w for w, _ in neighbours.most_common(topn)]
     if word in _VECTORS:
         vec = _VECTORS[word]
         scores: Dict[str, float] = {}
@@ -107,8 +110,7 @@ def suggest(word: str, topn: int = 3) -> List[str]:
             scores[other] = dot / (norm_a * norm_b)
         ordered = sorted(scores.items(), key=lambda x: x[1], reverse=True)
         return [w for w, _ in ordered[:topn]]
-    vocab = list(_VECTORS.keys())
-    return difflib.get_close_matches(word, vocab, n=topn)
+    return []
 
 
 def lookup_analogs(word: str) -> Optional[str]:

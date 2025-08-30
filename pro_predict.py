@@ -8,6 +8,8 @@ import math
 import difflib
 import numpy as np
 
+import morphology
+
 from pro_metrics import tokenize, lowercase
 from pro_memory import DB_PATH
 
@@ -193,11 +195,22 @@ def lookup_analogs(word: str) -> Optional[str]:
     analog = _SYNONYMS.get(word)
     if analog:
         return analog
+
     suggestions = suggest(word, topn=1)
     if suggestions:
         cand = suggestions[0]
         if difflib.SequenceMatcher(None, word, cand).ratio() >= 0.95:
             return cand
+
+    # Try to find an analog for the root and rebuild the word using known
+    # prefixes/suffixes.  The morphological analysis is cached in
+    # :mod:`morphology` so the extra work is cheap on repeated calls.
+    root, prefixes, suffixes = morphology.split(word)
+    if root != word:
+        analog_root = lookup_analogs(root)
+        if analog_root:
+            return "".join(prefixes) + analog_root + "".join(suffixes)
+
     return None
 
 

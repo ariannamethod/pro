@@ -139,6 +139,12 @@ Rewards accumulate across many turns.
 Moving averages flag progress and dips. Sudden drops trigger reviews.
 Stable curves mean healthy learning.
 
+### Evolutionary Mini-Model Distillation
+
+Mini-models mutate layers and train on dialogue slices.
+If their metrics beat the main model, their weights distill back.
+Evolution proceeds without full retraining.
+
 ### LoRA Adapter Persistence
 
 Low rank deltas retain personal tweaks. Users can resume from the same state later.

@@ -53,6 +53,8 @@ class ProEngine:
         self.last_forecast: Optional[Dict] = None
         self.dataset_queue: asyncio.Queue[Optional[str]] = asyncio.Queue()
         self._tune_worker_task: Optional[asyncio.Task] = None
+        self._watcher_task: Optional[asyncio.Task] = None
+        self._tune_tasks: List[asyncio.Task] = []
 
     async def setup(self) -> None:
         pro_predict._GRAPH = {}
@@ -123,11 +125,12 @@ class ProEngine:
                 except Exception as exc:  # pragma: no cover - logging side effect
                     logging.error("Dataset scan failed: %s", exc)
 
-        asyncio.create_task(_watch_datasets())
+        self._watcher_task = asyncio.create_task(_watch_datasets())
 
     def _start_tune_worker(self) -> None:
         if self._tune_worker_task is None or self._tune_worker_task.done():
             self._tune_worker_task = asyncio.create_task(self._tune_worker())
+            self._tune_tasks.append(self._tune_worker_task)
 
     async def _tune_worker(self) -> None:
         try:
@@ -198,6 +201,17 @@ class ProEngine:
             logging.error("Saving state failed after tuning: %s", exc)
         if tuned:
             logging.info("Tuned datasets: %s", ", ".join(tuned))
+
+    async def shutdown(self) -> None:
+        tasks: List[asyncio.Task] = []
+        if self._watcher_task is not None:
+            self._watcher_task.cancel()
+            tasks.append(self._watcher_task)
+        for task in self._tune_tasks:
+            task.cancel()
+            tasks.append(task)
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
 
     def compute_charged_words(self, words: List[str]) -> List[str]:
         word_counts = Counter(words)
@@ -789,7 +803,8 @@ class ProEngine:
                     json.dump(hashes, fh)
             except Exception as exc:  # pragma: no cover - logging side effect
                 logging.error("Updating dataset hash failed: %s", exc)
-            asyncio.create_task(self._async_tune([dataset_path]))
+            task = asyncio.create_task(self._async_tune([dataset_path]))
+            self._tune_tasks.append(task)
         except Exception as exc:  # pragma: no cover - logging side effect
             logging.error("Logging conversation failed: %s", exc)
         await asyncio.to_thread(
@@ -839,21 +854,24 @@ class ProEngine:
 
     async def interact(self) -> None:
         await self.setup()
-        while True:
-            try:
-                message = await asyncio.to_thread(input, '> ')
-            except EOFError:
-                break
-            message = message.strip()
-            if not message or message.lower() in {'exit', 'quit'}:
-                break
-            try:
-                response, _ = await self.process_message(message)
-            except Exception as exc:  # pragma: no cover - logging side effect
-                logging.error("Processing message failed: %s", exc)
-                print("An error occurred. Please try again.")
-                continue
-            print(response)
+        try:
+            while True:
+                try:
+                    message = await asyncio.to_thread(input, '> ')
+                except EOFError:
+                    break
+                message = message.strip()
+                if not message or message.lower() in {'exit', 'quit'}:
+                    break
+                try:
+                    response, _ = await self.process_message(message)
+                except Exception as exc:  # pragma: no cover - logging side effect
+                    logging.error("Processing message failed: %s", exc)
+                    print("An error occurred. Please try again.")
+                    continue
+                print(response)
+        finally:
+            await self.shutdown()
 
 
 if __name__ == '__main__':

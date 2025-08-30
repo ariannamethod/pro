@@ -35,6 +35,7 @@ from watchfiles import awatch
 from transformers.blocks import SymbolicReasoner
 import meta_controller
 from api import vector_store
+import pro_spawn
 
 STATE_PATH = 'pro_state.json'
 HASH_PATH = 'dataset_sha.json'
@@ -95,6 +96,7 @@ class ProEngine:
         chaos_factor: float = 0.0,
         similarity_threshold: float = 0.3,
         saliency_threshold: float = 0.0,
+        novelty_threshold: float = 0.9,
     ) -> None:
         self.state: Dict = {
             'word_counts': {},
@@ -109,6 +111,7 @@ class ProEngine:
         self.chaos_factor = chaos_factor
         self.similarity_threshold = similarity_threshold
         self.saliency_threshold = saliency_threshold
+        self.novelty_threshold = novelty_threshold
         self.candidate_buffer: deque = deque(maxlen=20)
         self.last_forecast: Optional[Dict] = None
         self.dataset_queue: asyncio.Queue[Optional[str]] = asyncio.Queue()
@@ -428,6 +431,24 @@ class ProEngine:
             logging.error("Saving state failed after tuning: %s", exc)
         if tuned:
             logging.info("Tuned datasets: %s", ", ".join(tuned))
+
+    async def _maybe_spawn_specialist(self, dataset_path: str) -> None:
+        """Spawn and merge a specialist if topic novelty is high."""
+        if not self.last_forecast:
+            return
+        novelty = self.last_forecast.get("novelty", 0.0)
+        if novelty <= self.novelty_threshold:
+            return
+        try:
+            specialist = await asyncio.to_thread(
+                pro_spawn.create_specialist, self.state, dataset_path
+            )
+            if specialist is not None:
+                self.state = await asyncio.to_thread(
+                    pro_tune.merge_specialist, self.state, specialist
+                )
+        except Exception as exc:  # pragma: no cover - logging side effect
+            logging.error("Spawning specialist failed: %s", exc)
 
     async def shutdown(self) -> None:
         tasks: List[asyncio.Task] = []
@@ -1114,6 +1135,7 @@ class ProEngine:
         await self.meta_controller.update(resp_metrics)
         self.arch_controller.update(resp_metrics)
         self.log(message, response, metrics)
+        await self._maybe_spawn_specialist(dataset_path)
         return response, metrics
 
     def log(self, user: str, response: str, metrics: Dict) -> None:

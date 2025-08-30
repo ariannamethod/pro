@@ -51,10 +51,18 @@ def _build_graph(dataset_dir: str = "datasets") -> Dict[str, Counter]:
     graph: Dict[str, Counter] = defaultdict(Counter)
     if not os.path.exists(dataset_dir):
         return graph
+    files: List[str] = []
+    main_path = os.path.join(dataset_dir, "smalltalk.txt")
+    if os.path.isfile(main_path):
+        files.append(main_path)
     for name in os.listdir(dataset_dir):
+        if name == "smalltalk.txt" or name.endswith(".pkl"):
+            continue
         path = os.path.join(dataset_dir, name)
         if not os.path.isfile(path):
             continue
+        files.append(path)
+    for path in files:
         with open(path, "r", encoding="utf-8") as fh:
             for line in fh:
                 words = lowercase(tokenize(line))

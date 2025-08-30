@@ -274,7 +274,7 @@ class ProEngine:
         for ngram, c in self.state['char_ngram_counts'].items():
             self.state['char_ngram_inv'][ngram] = 1.0 / c
         if not self.state['word_counts']:
-            dataset_path = 'datasets/lines01.txt'
+            dataset_path = 'datasets/smalltalk.txt'
             if not os.path.exists(dataset_path):
                 logging.warning(
                     "Dataset path %s does not exist; "

@@ -34,6 +34,8 @@ HASH_PATH = 'dataset_sha.json'
 LOG_PATH = 'pro.log'
 TUNE_CONCURRENCY = 4
 
+FORBIDDEN_ENDINGS = {"the", "a", "and", "or", "his", "my", "their"}
+
 
 class ProEngine:
     def __init__(
@@ -636,12 +638,12 @@ class ProEngine:
             words2[0] = first2
             sentence2 = " ".join(filter(None, words2[:target_length2])) + "."
             last1 = sentence1.rstrip(".").split()[-1].lower()
-            if last1 in {"the", "a", "and", "or"}:
+            if last1 in FORBIDDEN_ENDINGS:
                 replacement = next(
                     (
                         w
                         for w in ordered
-                        if w.lower() not in {"the", "a", "and", "or"}
+                        if w.lower() not in FORBIDDEN_ENDINGS
                     ),
                     last1,
                 )
@@ -650,12 +652,12 @@ class ProEngine:
                 sentence1 = " ".join(parts) + "."
 
             last2 = sentence2.rstrip(".").split()[-1].lower()
-            if last2 in {"the", "a", "and", "or"}:
+            if last2 in FORBIDDEN_ENDINGS:
                 replacement2 = next(
                     (
                         w
                         for w in ordered2
-                        if w.lower() not in {"the", "a", "and", "or"}
+                        if w.lower() not in FORBIDDEN_ENDINGS
                     ),
                     last2,
                 )

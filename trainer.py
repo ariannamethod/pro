@@ -1,5 +1,6 @@
 """Simple training loop with layer evaluation and time folding."""
 from autoadapt import LayerMutator, MetricMonitor
+from pro_evo import MiniModel
 import numpy as np
 from quantum_memory import QuantumMemory
 from transformers.time_fold import TimeFoldTransformer
@@ -36,6 +37,14 @@ class Trainer:
         if self.step % self.eval_interval == 0:
             self._evaluate(layer)
 
+    def evolve(self, layer: str, dialogue: list[str], metric: float) -> None:
+        """Train a mini-model on a slice of dialogue and distill weights."""
+        mini = MiniModel(layer, use_lora=self.mutator.use_lora)
+        half = max(1, len(dialogue) // 2)
+        mini.train(dialogue[:half])
+        if mini.score() < metric:
+            mini.distill(self.mutator)
+
     def _evaluate(self, layer: str) -> None:
         avg = self.monitor.average()
         if avg < 0.5:
@@ -47,7 +56,9 @@ class Trainer:
     def _gradient_echo(self, value: float) -> None:
         """Propagate a dummy gradient through future predictions."""
 
-        tf = TimeFoldTransformer(lambda x: x, self.time_fold_steps, QuantumMemory())
+        tf = TimeFoldTransformer(
+            lambda x: x, self.time_fold_steps, QuantumMemory()
+        )
         arr = np.array([value], dtype=np.float32)
         tf.forward(arr)
         tf.echo_backward(np.ones_like(arr))

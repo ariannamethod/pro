@@ -10,6 +10,7 @@ import numpy as np
 import contextlib
 
 import morphology
+from transformers.blocks import DynamicContextGate
 
 from pro_metrics import tokenize, lowercase
 from pro_memory import DB_PATH
@@ -241,7 +242,9 @@ def lookup_analogs(word: str) -> Optional[str]:
 class MiniSelfAttention:
     """A tiny self-attention module for next-word prediction."""
 
-    def __init__(self, vocab: List[str], dim: int = 32) -> None:
+    def __init__(
+        self, vocab: List[str], dim: int = 32, use_gate: bool = True
+    ) -> None:
         self.vocab = vocab
         self.dim = dim
         rng = np.random.default_rng(0)
@@ -250,6 +253,8 @@ class MiniSelfAttention:
         self.w_k = rng.standard_normal((dim, dim))
         self.w_v = rng.standard_normal((dim, dim))
         self.w_o = rng.standard_normal((dim, len(vocab)))
+        self.use_gate = use_gate
+        self.gate = DynamicContextGate(dim) if use_gate else None
         if os.path.exists(TRANSFORMER_PATH):
             try:
                 data = np.load(TRANSFORMER_PATH, allow_pickle=True)
@@ -260,6 +265,8 @@ class MiniSelfAttention:
                     self.w_k = data["w_k"]
                     self.w_v = data["w_v"]
                     self.w_o = data["w_o"]
+                    if self.gate and "gate_bias" in data:
+                        self.gate.load_state_dict({"bias": data["gate_bias"]})
             except Exception:
                 pass
 
@@ -272,6 +279,7 @@ class MiniSelfAttention:
             w_k=self.w_k,
             w_v=self.w_v,
             w_o=self.w_o,
+            gate_bias=self.gate.bias if self.gate else np.zeros(self.dim),
         )
 
     def train_step(self, tokens: List[str], target: str, lr: float = 0.1) -> None:
@@ -287,6 +295,8 @@ class MiniSelfAttention:
         att = np.exp(att - att.max(axis=-1, keepdims=True))
         att = att / att.sum(axis=-1, keepdims=True)
         context = att @ v
+        if self.gate:
+            context = self.gate(context)
         pooled = context.mean(axis=0)
         out = pooled @ self.w_o
         exp_out = np.exp(out - out.max())
@@ -309,6 +319,8 @@ class MiniSelfAttention:
         att = np.exp(att - att.max(axis=-1, keepdims=True))
         att = att / att.sum(axis=-1, keepdims=True)
         context = att @ v
+        if self.gate:
+            context = self.gate(context)
         pooled = context.mean(axis=0)
         out = pooled @ self.w_o
         return {self.vocab[i]: float(out[i]) for i in range(len(self.vocab))}

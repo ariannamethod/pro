@@ -1,5 +1,7 @@
 import os
 import sqlite3
+import pickle
+import atexit
 from collections import Counter, defaultdict
 from typing import Dict, List, Optional
 import math
@@ -8,6 +10,8 @@ import numpy as np
 
 from pro_metrics import tokenize, lowercase
 from pro_memory import DB_PATH
+
+DATA_PATH = "pro_predict.pkl"
 
 _GRAPH: Dict[str, Counter] = {}
 _VECTORS: Dict[str, Dict[str, float]] = {}
@@ -61,6 +65,9 @@ def _ensure_vectors() -> None:
     global _GRAPH, _VECTORS
     if _VECTORS:
         return
+    load_vectors()
+    if _VECTORS:
+        return
     _GRAPH = _build_graph()
     _VECTORS = _build_embeddings(_GRAPH)
 
@@ -71,9 +78,9 @@ async def update(word_list: List[str]) -> None:
     The *word_list* should contain individual tokens. After the update the
     words become part of the internal vocabulary used by :func:`suggest`.
     """
-    global _VECTORS
     _ensure_vectors()
     words = lowercase(word_list)
+    updated = set()
     for i, word in enumerate(words):
         for j in range(i + 1, len(words)):
             other = words[j]
@@ -81,7 +88,38 @@ async def update(word_list: List[str]) -> None:
                 continue
             _GRAPH.setdefault(word, Counter())[other] += 1
             _GRAPH.setdefault(other, Counter())[word] += 1
-    _VECTORS = _build_embeddings(_GRAPH)
+            updated.add(word)
+            updated.add(other)
+    for w in updated:
+        neighbours = _GRAPH.get(w, {})
+        total = sum(neighbours.values()) or 1
+        _VECTORS[w] = {n: cnt / total for n, cnt in neighbours.items()}
+
+
+def save_vectors(path: str = DATA_PATH) -> None:
+    """Persist the graph and vectors to *path* using pickle."""
+    try:
+        with open(path, "wb") as fh:
+            pickle.dump({"graph": _GRAPH, "vectors": _VECTORS}, fh)
+    except OSError:
+        pass
+
+
+def load_vectors(path: str = DATA_PATH) -> None:
+    """Load the graph and vectors from *path* if available."""
+    global _GRAPH, _VECTORS
+    if not os.path.exists(path):
+        return
+    try:
+        with open(path, "rb") as fh:
+            data = pickle.load(fh)
+        _GRAPH = data.get("graph", {})
+        _VECTORS = data.get("vectors", {})
+    except (OSError, pickle.PickleError):
+        _GRAPH, _VECTORS = {}, {}
+
+
+atexit.register(save_vectors)
 
 
 def suggest(word: str, topn: int = 3) -> List[str]:
@@ -165,7 +203,9 @@ class MiniSelfAttention:
 _TRANSFORMERS: Dict[tuple, MiniSelfAttention] = {}
 
 
-def transformer_logits(tokens: List[str], vocab: List[str]) -> Dict[str, float]:
+def transformer_logits(
+    tokens: List[str], vocab: List[str]
+) -> Dict[str, float]:
     """Return next-word logits for *tokens* using a tiny transformer."""
     key = tuple(vocab)
     if key not in _TRANSFORMERS:

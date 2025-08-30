@@ -27,6 +27,7 @@ import pro_forecast
 import pro_meta
 from pro_identity import swap_pronouns
 from watchfiles import awatch
+from transformers.blocks import SymbolicReasoner
 
 STATE_PATH = 'pro_state.json'
 HASH_PATH = 'dataset_sha.json'
@@ -58,6 +59,7 @@ class ProEngine:
         self._tune_tasks: List[asyncio.Task] = []
         self._tune_semaphore = asyncio.BoundedSemaphore(TUNE_CONCURRENCY)
         self.adapter_pool = self._load_adapters()
+        self.reasoner = SymbolicReasoner()
 
     def _load_adapters(self) -> Dict[str, Dict]:
         pool: Dict[str, Dict] = {}
@@ -758,6 +760,12 @@ class ProEngine:
         except Exception as exc:  # pragma: no cover - logging side effect
             logging.error("Context retrieval failed: %s", exc)
         context = memory_context + context
+        try:
+            if re.search(r"\b(AND|OR|NOT)\b", message):
+                result = self.reasoner.evaluate(message, {w: True for w in words})
+                predicted.append(str(result).lower())
+        except Exception:
+            pass
         context_tokens = tokenize(' '.join(context))
         all_words = words + lowercase(context_tokens)
         metrics = await asyncio.to_thread(

@@ -4,6 +4,7 @@ import sys
 
 sys.path.append(str(pathlib.Path(__file__).resolve().parents[2]))
 from pro_predict import MiniSelfAttention  # noqa: E402
+from transformers.blocks import ResonantDropout  # noqa: E402
 from transformers.modeling_transformer import (  # noqa: E402
     MemoryAttention,
     ResonantAdapter,
@@ -35,3 +36,14 @@ def test_resonant_adapter_adds_signal():
     out = attention(hidden, "d", "s")
     expected = ResonantAdapter(1.0, 0.1)(4)
     assert np.allclose(out, expected)
+
+
+def test_resonant_dropout_depends_on_frequency():
+    ctx = np.ones((10, 100), dtype=np.float32)
+    slow = ResonantDropout(0.1, seed=0)
+    fast = ResonantDropout(1.0, seed=0)
+    out_slow = slow(ctx)
+    out_fast = fast(ctx)
+    zero_slow = np.mean(out_slow == 0.0)
+    zero_fast = np.mean(out_fast == 0.0)
+    assert zero_slow != zero_fast

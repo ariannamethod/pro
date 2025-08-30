@@ -1,10 +1,11 @@
-from .blocks import DynamicContextGate
+from .blocks import DynamicContextGate, ResonantDropout
 from .modeling_transformer import MemoryAttention, register_kernel
 from .quantum_attention import QuantumAttention
 from .time_fold import TimeFoldTransformer
 
 __all__ = [
     "DynamicContextGate",
+    "ResonantDropout",
     "MemoryAttention",
     "register_kernel",
     "QuantumAttention",

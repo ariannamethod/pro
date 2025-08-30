@@ -1,4 +1,4 @@
-from .attention import DynamicContextGate
+from .attention import DynamicContextGate, ResonantDropout
 from .reasoning import (
     SymbolicAnd,
     SymbolicOr,
@@ -8,6 +8,7 @@ from .reasoning import (
 
 __all__ = [
     "DynamicContextGate",
+    "ResonantDropout",
     "SymbolicAnd",
     "SymbolicOr",
     "SymbolicNot",

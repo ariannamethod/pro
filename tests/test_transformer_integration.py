@@ -28,7 +28,7 @@ def test_process_message_blends_transformer(tmp_path, monkeypatch):
 
     called = {}
 
-    def fake_transformer(tokens, vocab):
+    def fake_transformer(tokens, vocab, adapters=None):
         called["tokens"] = list(tokens)
         return {"baz": 1.0}
 

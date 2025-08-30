@@ -306,7 +306,9 @@ class MiniSelfAttention:
         grad = probs - y
         self.w_o -= lr * np.outer(pooled, grad)
 
-    def logits(self, tokens: List[str]) -> Dict[str, float]:
+    def logits(
+        self, tokens: List[str], adapters: Optional[List[Dict[str, float]]] = None
+    ) -> Dict[str, float]:
         ids = [self.vocab.index(t) for t in tokens if t in self.vocab]
         if not ids:
             return {w: 0.0 for w in self.vocab}
@@ -323,21 +325,29 @@ class MiniSelfAttention:
             context = self.gate(context)
         pooled = context.mean(axis=0)
         out = pooled @ self.w_o
-        return {self.vocab[i]: float(out[i]) for i in range(len(self.vocab))}
+        logits = {self.vocab[i]: float(out[i]) for i in range(len(self.vocab))}
+        if adapters:
+            for adapter in adapters:
+                for word, bias in adapter.items():
+                    if word in logits:
+                        logits[word] += bias
+        return logits
 
 
 _TRANSFORMERS: Dict[tuple, MiniSelfAttention] = {}
 
 
 def transformer_logits(
-    tokens: List[str], vocab: List[str]
+    tokens: List[str],
+    vocab: List[str],
+    adapters: Optional[List[Dict[str, float]]] = None,
 ) -> Dict[str, float]:
     """Return next-word logits for *tokens* using a tiny transformer."""
     key = tuple(vocab)
     if key not in _TRANSFORMERS:
         _TRANSFORMERS[key] = MiniSelfAttention(vocab)
     model = _TRANSFORMERS[key]
-    return model.logits(tokens)
+    return model.logits(tokens, adapters=adapters)
 
 
 async def update_transformer(

@@ -269,6 +269,8 @@ class ProEngine:
 
         Candidates are scored by combining entropy and trigram perplexity.
         Paths that would repeat words (case-insensitive) are discarded.
+        Additionally, no more than two single-letter words may appear
+        consecutively and a sentence cannot end with two single letters.
         """
         trigram_counts = self.state.get("trigram_counts", {})
         bigram_counts = self.state.get("bigram_counts", {})
@@ -319,6 +321,11 @@ class ProEngine:
                             or (lw == "a" and prev_lw in {"you", "i"})
                         ):
                             continue
+                        if len(cand) == 1 and len(seq[-1]) == 1:
+                            if len(seq) >= 2 and len(seq[-2]) == 1:
+                                continue
+                            if len(seq) + 1 == target_length:
+                                continue
                     if lw in used:
                         continue
                     new_seq = seq + [cand]

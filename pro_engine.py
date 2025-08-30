@@ -7,7 +7,9 @@ import math
 import random
 import re
 from typing import Dict, List, Tuple, Set, Optional
-from collections import Counter
+from collections import Counter, deque
+
+import numpy as np
 
 from pro_metrics import (
     tokenize,
@@ -19,6 +21,7 @@ import pro_tune
 import pro_sequence
 import pro_memory
 import pro_rag
+import pro_rag_embedding
 import pro_predict
 from pro_identity import swap_pronouns
 from watchfiles import awatch
@@ -44,6 +47,7 @@ class ProEngine:
         }
         self.chaos_factor = chaos_factor
         self.similarity_threshold = similarity_threshold
+        self.candidate_buffer: deque = deque(maxlen=20)
 
     async def setup(self) -> None:
         pro_predict._GRAPH = {}
@@ -527,11 +531,27 @@ class ProEngine:
                 attempt_seeds = list(seeds) + [f"alt{extra_idx}"]
             extra_idx += 1
 
+    async def prepare_candidates(self) -> None:
+        """Generate candidate responses for recent messages."""
+        try:
+            recent = await pro_memory.fetch_recent_messages(5)
+            new_cands = []
+            for msg, emb in recent:
+                seeds = tokenize(msg)
+                for _ in range(2):
+                    resp = await self.respond(seeds)
+                    new_cands.append((emb, resp))
+            for cand in new_cands:
+                self.candidate_buffer.append(cand)
+        except Exception as exc:  # pragma: no cover - logging side effect
+            logging.error("Preparing candidates failed: %s", exc)
+
     async def process_message(self, message: str) -> Tuple[str, Dict]:
         original_words = tokenize(message)
         words = lowercase(original_words)
         words = swap_pronouns(words)
         user_forbidden = set(words)
+        msg_emb = await pro_rag_embedding.embed_sentence(message)
         unknown: List[str] = [
             w for w in words if w not in self.state['word_counts']
         ]
@@ -625,7 +645,20 @@ class ProEngine:
         combined_vocab = await asyncio.to_thread(
             _combine_vocab, mem_tokens, data_tokens
         )
-        if self.chaos_factor:
+        best_candidate = None
+        best_sim = 0.0
+        for emb, resp in list(self.candidate_buffer):
+            sim = float(np.dot(msg_emb, emb))
+            if sim > best_sim:
+                best_sim = sim
+                best_candidate = (emb, resp)
+        if best_candidate and best_sim > 0.9:
+            response = best_candidate[1]
+            try:
+                self.candidate_buffer.remove(best_candidate)
+            except ValueError:
+                pass
+        elif self.chaos_factor:
             response = await self.respond(
                 seed_words,
                 combined_vocab,
@@ -673,6 +706,7 @@ class ProEngine:
             await self.save_state()
         except Exception as exc:  # pragma: no cover - logging side effect
             logging.error("Saving state failed: %s", exc)
+        asyncio.create_task(self.prepare_candidates())
         self.log(message, response, metrics)
         return response, metrics
 

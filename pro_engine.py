@@ -3,6 +3,7 @@ import logging
 import os
 import hashlib
 import asyncio
+import subprocess
 import math
 import random
 import re
@@ -310,14 +311,15 @@ class ProEngine:
         if load > 0.2:
             return False
         try:
-            proc = await asyncio.create_subprocess_exec(
-                "nvidia-smi",
-                "--query-gpu=utilization.gpu",
-                "--format=csv,noheader,nounits",
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.DEVNULL,
+            out = await asyncio.to_thread(
+                subprocess.check_output,
+                [
+                    "nvidia-smi",
+                    "--query-gpu=utilization.gpu",
+                    "--format=csv,noheader,nounits",
+                ],
+                stderr=subprocess.DEVNULL,
             )
-            out, _ = await proc.communicate()
             util = int(out.decode().splitlines()[0])
             if util > 10:
                 return False
@@ -329,7 +331,8 @@ class ProEngine:
         try:
             while True:
                 await asyncio.sleep(5)
-                if await self._system_idle():
+                idle = await self._system_idle()
+                if idle:
                     try:
                         await dream_mode.run(self)
                     except Exception:

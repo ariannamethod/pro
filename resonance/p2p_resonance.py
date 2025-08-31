@@ -1,40 +1,36 @@
+import asyncio
 import hashlib
 import json
-import socket
-import socketserver
-from threading import Thread
-from typing import Dict
+from typing import Dict, Tuple
 
 
-class _ResonanceHandler(socketserver.BaseRequestHandler):
-    """Handle incoming gradient hashes and exchange updates."""
-
-    def handle(self) -> None:  # type: ignore[override]
-        data = self.request.recv(65536)
-        if not data:
-            return
-        msg = json.loads(data.decode("utf-8"))
-        update = msg.get("update", {})
-        self.server.peer.apply_gradients(update)  # type: ignore[attr-defined]
-        payload = {
-            "hash": self.server.peer.current_hash(),  # type: ignore[attr-defined]
-            "update": self.server.peer.pop_pending(),  # type: ignore[attr-defined]
-        }
-        self.request.sendall(json.dumps(payload).encode("utf-8"))
-
-
-class P2PResonance(socketserver.ThreadingTCPServer):
-    """Simple P2P node exchanging gradient hashes over TCP."""
-
-    allow_reuse_address = True
+class P2PResonance:
+    """Simple P2P node exchanging gradient hashes using asyncio streams."""
 
     def __init__(self) -> None:
-        super().__init__(("127.0.0.1", 0), _ResonanceHandler)
-        self.peer = self  # for handler access
         self.params: Dict[str, float] = {}
         self._pending: Dict[str, float] = {}
-        self._thread = Thread(target=self.serve_forever, daemon=True)
-        self._thread.start()
+        self._server: asyncio.AbstractServer | None = None
+        self._host: str = "127.0.0.1"
+        self._port: int = 0
+
+    # ------------------------------------------------------------------
+    async def start(self) -> None:
+        """Start listening for peer connections."""
+        self._server = await asyncio.start_server(self._handle, self._host, 0)
+        sock = self._server.sockets[0]
+        addr = sock.getsockname()
+        self._host, self._port = addr[0], addr[1]
+
+    @property
+    def server_address(self) -> Tuple[str, int]:
+        return self._host, self._port
+
+    async def stop(self) -> None:
+        if self._server is not None:
+            self._server.close()
+            await self._server.wait_closed()
+            self._server = None
 
     # Gradient management -------------------------------------------------
     def queue_update(self, grads: Dict[str, float]) -> None:
@@ -57,20 +53,38 @@ class P2PResonance(socketserver.ThreadingTCPServer):
         return hashlib.sha256(data).hexdigest()
 
     # Networking ----------------------------------------------------------
-    def exchange(self, host: str, port: int) -> Dict[str, float]:
+    async def _handle(
+        self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter
+    ) -> None:
+        data = await reader.read(65536)
+        if not data:
+            writer.close()
+            await writer.wait_closed()
+            return
+        msg = json.loads(data.decode("utf-8"))
+        update = msg.get("update", {})
+        self.apply_gradients(update)
+        payload = {
+            "hash": self.current_hash(),
+            "update": self.pop_pending(),
+        }
+        writer.write(json.dumps(payload).encode("utf-8"))
+        await writer.drain()
+        writer.close()
+        await writer.wait_closed()
+
+    async def exchange(self, host: str, port: int) -> Dict[str, float]:
         """Send queued gradients to ``host`` and receive its update."""
         update = self.pop_pending()
         msg = json.dumps({"update": update, "hash": self.current_hash()}).encode(
             "utf-8"
         )
-        with socket.create_connection((host, port), timeout=1.0) as sock:
-            sock.sendall(msg)
-            resp = sock.recv(65536)
+        reader, writer = await asyncio.open_connection(host, port)
+        writer.write(msg)
+        await writer.drain()
+        resp = await reader.read(65536)
+        writer.close()
+        await writer.wait_closed()
         payload = json.loads(resp.decode("utf-8"))
         self.apply_gradients(payload.get("update", {}))
         return payload.get("update", {})
-
-    def stop(self) -> None:
-        self.shutdown()
-        self.server_close()
-        self._thread.join(timeout=1.0)

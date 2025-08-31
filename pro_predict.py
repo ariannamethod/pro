@@ -12,6 +12,7 @@ import contextlib
 
 import morphology
 from transformers.blocks import DynamicContextGate
+from transformers.quantum_dropout import quantum_dropout
 
 from pro_metrics import tokenize, lowercase
 from pro_memory import DB_PATH
@@ -301,6 +302,7 @@ class MiniSelfAttention:
         att = np.exp(att - att.max(axis=-1, keepdims=True))
         att = att / att.sum(axis=-1, keepdims=True)
         context = att @ v
+        context = quantum_dropout(context)
         if self.gate:
             context = self.gate(context)
         pooled = context.mean(axis=0)
@@ -327,6 +329,7 @@ class MiniSelfAttention:
         att = np.exp(att - att.max(axis=-1, keepdims=True))
         att = att / att.sum(axis=-1, keepdims=True)
         context = att @ v
+        context = quantum_dropout(context)
         if self.gate:
             context = self.gate(context)
         pooled = context.mean(axis=0)

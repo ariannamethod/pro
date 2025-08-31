@@ -8,7 +8,11 @@ import os
 import time
 from typing import List, Optional
 
-import torch
+# Torch is optional; when unavailable we fall back to CPU-only behaviour.
+try:  # pragma: no cover - best effort import
+    import torch
+except Exception:  # pragma: no cover - torch may not be installed
+    torch = None  # type: ignore[assignment]
 
 from self_reflect import SelfFineTuner
 
@@ -17,11 +21,13 @@ INTERVAL_SECONDS = int(os.getenv("SELF_REFLECT_INTERVAL", "86400"))
 
 
 def run_cycle(conversations: Optional[List[str]] = None) -> None:
-    """Run a single self-reflection cycle with GPU limits."""
-    os.environ.setdefault("CUDA_VISIBLE_DEVICES", "0")
-    if torch.cuda.is_available():
+    """Run a single self-reflection cycle with optional GPU limits."""
+    if torch is not None and torch.cuda.is_available():
+        os.environ.setdefault("CUDA_VISIBLE_DEVICES", "0")
         torch.cuda.set_per_process_memory_fraction(GPU_FRACTION, 0)
-    tuner = SelfFineTuner()
+        tuner = SelfFineTuner()
+    else:  # CPU-only path when torch or CUDA is unavailable
+        tuner = SelfFineTuner()
     tuner.run(conversations or [])
 
 

@@ -1,46 +1,59 @@
-"""Complex-valued self-attention using ``torch.view_as_complex``.
+"""Complex-valued self-attention implemented with NumPy.
 
 This is a tiny demonstrative implementation that interprets real and
-imaginary parts stacked along the last dimension.  Inputs are expected to
+imaginary parts stacked along the last dimension. Inputs are expected to
 have shape ``(..., 2 * dim)`` where the final dimension alternates real and
-imaginary components.  The module converts them into complex tensors,
-performs a scaled dot-product attention in the complex domain and returns the
-result flattened back to real/imag parts.
+imaginary components. The module converts them into complex arrays,
+performs a scaled dot-product attention in the complex domain and returns
+the result flattened back to real/imag parts.
 """
 
 from __future__ import annotations
 
 import math
-import torch
-from torch import nn
+import numpy as np
 
 
-def _to_complex(x: torch.Tensor) -> torch.Tensor:
+def _to_complex(x: np.ndarray) -> np.ndarray:
     """View the last dimension of ``x`` as complex numbers."""
-    # ``torch.view_as_complex`` expects an extra dimension of size 2 holding
-    # the real and imaginary parts respectively.
-    x = x.view(*x.shape[:-1], -1, 2)
-    return torch.view_as_complex(x)
+    x = x.reshape(*x.shape[:-1], -1, 2)
+    return x[..., 0] + 1j * x[..., 1]
 
 
-class ComplexAttention(nn.Module):
-    """Minimal complex self-attention layer."""
+def _softmax(x: np.ndarray, axis: int = -1) -> np.ndarray:
+    """Return the softmax of ``x`` along ``axis``."""
+    e_x = np.exp(x - np.max(x, axis=axis, keepdims=True))
+    return e_x / np.sum(e_x, axis=axis, keepdims=True)
+
+
+class Linear:
+    """Simple linear projection implemented with NumPy arrays."""
+
+    def __init__(self, in_features: int, out_features: int) -> None:
+        rng = np.random.default_rng()
+        self.weight = rng.standard_normal((out_features, in_features))
+        self.bias = np.zeros(out_features)
+
+    def __call__(self, x: np.ndarray) -> np.ndarray:
+        return x @ self.weight.T + self.bias
+
+
+class ComplexAttention:
+    """Minimal complex self-attention layer using NumPy arrays."""
 
     def __init__(self, dim: int) -> None:
-        super().__init__()
         self.dim = dim
-        # projections produce real and imaginary parts for Q, K, V
-        self.q_proj = nn.Linear(dim, 2 * dim)
-        self.k_proj = nn.Linear(dim, 2 * dim)
-        self.v_proj = nn.Linear(dim, 2 * dim)
-        self.out_proj = nn.Linear(2 * dim, dim)
+        self.q_proj = Linear(dim, 2 * dim)
+        self.k_proj = Linear(dim, 2 * dim)
+        self.v_proj = Linear(dim, 2 * dim)
+        self.out_proj = Linear(2 * dim, dim)
 
-    def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
+    def forward(self, hidden_states: np.ndarray) -> np.ndarray:
         """Return attention output for ``hidden_states``.
 
-        ``hidden_states`` is interpreted as real-valued input.  It is projected
-        to complex queries, keys and values.  Attention weights are computed
-        from the real part of the complex scores.  The complex result is
+        ``hidden_states`` is interpreted as real-valued input. It is projected
+        to complex queries, keys and values. Attention weights are computed
+        from the real part of the complex scores. The complex result is
         flattened back to real/imag parts before a final linear projection.
         """
 
@@ -49,8 +62,12 @@ class ComplexAttention(nn.Module):
         v = _to_complex(self.v_proj(hidden_states))
 
         scale = 1.0 / math.sqrt(self.dim)
-        scores = torch.matmul(q, k.conj().transpose(-2, -1)) * scale
-        weights = torch.softmax(scores.real, dim=-1)
-        out = torch.matmul(weights, v)
-        out = torch.view_as_real(out).reshape(*hidden_states.shape[:-1], -1)
+        scores = np.matmul(q, np.conjugate(np.swapaxes(k, -2, -1))) * scale
+        weights = _softmax(scores.real, axis=-1)
+        out = np.matmul(weights, v)
+        out = np.stack((out.real, out.imag), axis=-1).reshape(
+            *hidden_states.shape[:-1], -1
+        )
         return self.out_proj(out)
+
+    __call__ = forward

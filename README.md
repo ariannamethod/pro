@@ -222,14 +222,29 @@ Shares gradient hashes between nodes without central servers. Exchanges apply up
 
 Minimal endpoint storing dialogue turns in a memory graph. Calls return vectors enriched by attention layers. The API simplifies integration. It also streamlines future extensions.
 
-### Vector Store API
-
-Unified endpoint accepts embeddings and returns nearby vectors. Clients submit fragments and fetch matches without touching the database. This choice facilitates ongoing refinement.
-The API keeps external tools in sync.
-
 ### Smalltalk Technology
 
 Treats conversation as a chain that keeps chats lively. Each link adds fresh energy. This choice facilitates ongoing refinement.
+
+### Dream Mode Background Training
+
+Dream Mode updates weights quietly during idle periods. Background cycles refine models without interrupting live exchanges.
+
+### Adapter Pool Persistence
+
+Adapters store specialized behaviors and load instantly when needed. Their snapshots keep custom skills available across sessions.
+
+### AutoAdapt Utilities
+
+Helper tools mutate layers and manage LoRA adapters with minimal code. They automate routine setup so experiments move faster.
+
+### Vector Store API
+
+Unified endpoints accept embeddings and return nearby vectors. External clients read and write similarities without touching the database.
+
+### Upcoming DeepSeek Integration
+
+Planned hooks will connect to DeepSeek models for extended context windows. Sparse kernels promise longer chats while conserving compute.
 
 ## Telegram Interface
 

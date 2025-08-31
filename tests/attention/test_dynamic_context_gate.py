@@ -5,10 +5,7 @@ import sys
 sys.path.append(str(pathlib.Path(__file__).resolve().parents[2]))
 from pro_predict import MiniSelfAttention  # noqa: E402
 from transformers.blocks import ResonantDropout  # noqa: E402
-from transformers.modeling_transformer import (  # noqa: E402
-    MemoryAttention,
-    ResonantAdapter,
-)
+from transformers.modeling_transformer import MemoryAttention  # noqa: E402
 
 
 def test_gate_can_zero_context():
@@ -26,7 +23,7 @@ def test_gate_can_zero_context():
     assert any(abs(boosted[w]) > abs(baseline[w]) for w in vocab)
 
 
-def test_resonant_adapter_adds_signal():
+def test_harmonic_layer_adds_signal():
     class EmptyRetriever:
         def last_message(self, dialogue_id, speaker):
             return None
@@ -34,8 +31,8 @@ def test_resonant_adapter_adds_signal():
     attention = MemoryAttention(EmptyRetriever(), dim=4)
     hidden = np.zeros(4, dtype=np.float32)
     out = attention(hidden, "d", "s")
-    expected = ResonantAdapter(1.0, 0.1)(4)
-    assert np.allclose(out, expected)
+    expected = attention.resonance(hidden)
+    assert np.allclose(out, hidden + expected)
 
 
 def test_resonant_dropout_depends_on_frequency():

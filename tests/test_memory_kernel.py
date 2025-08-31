@@ -1,10 +1,6 @@
 import numpy as np
 
-from transformers.modeling_transformer import (
-    MemoryAttention,
-    ResonantAdapter,
-    register_kernel,
-)
+from transformers.modeling_transformer import MemoryAttention, register_kernel
 
 
 class DummyRetriever:
@@ -22,7 +18,7 @@ def test_custom_memory_kernel_executes_and_resets():
     register_kernel("lambda h, m: h * 0.5 + m")
     attn = MemoryAttention(retriever, dim=dim)
     out = attn(hidden, "d", "s")
-    adapter = ResonantAdapter(1.0, 0.1)(dim)
-    assert np.allclose(out, hidden * 0.5 + np.ones(dim) + adapter)
+    harmonic = attn.resonance(hidden)
+    assert np.allclose(out, hidden * 0.5 + np.ones(dim) + harmonic)
     # Clean up so subsequent tests use default behaviour
     register_kernel(None)

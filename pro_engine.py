@@ -35,7 +35,7 @@ from pro_identity import swap_pronouns
 import grammar_filters
 from watchfiles import awatch
 from transformers.blocks import SymbolicReasoner
-import meta_controller
+from meta_controller import MetaController
 from api import vector_store
 import pro_spawn
 
@@ -46,50 +46,6 @@ TUNE_CONCURRENCY = 4
 COMPRESSION_INTERVAL = 100
 
 FORBIDDEN_ENDINGS = {"the", "a", "and", "or", "his", "my", "their"}
-
-
-class MetaController:
-    """Monitor response metrics and trigger local fine-tuning.
-
-    The controller keeps a rolling window of perplexity values.  When the
-    average perplexity in the window exceeds a moving baseline by more than a
-    tolerance, a tuning job is scheduled by pushing ``None`` onto the engine's
-    dataset queue.  This leverages the existing tuning worker which interprets
-    ``None`` as a signal to perform a lightweight tune without new data.
-    """
-
-    def __init__(
-        self, engine: "ProEngine", window: int = 5, tolerance: float = 0.1
-    ) -> None:
-        self.engine = engine
-        self.window = window
-        self.tolerance = tolerance
-        self._history: deque[float] = deque(maxlen=window)
-        self._baseline: Optional[float] = None
-
-    async def update(self, metrics: Dict[str, float]) -> None:
-        """Update metrics and trigger tuning if quality degrades."""
-
-        perplexity = metrics.get("perplexity")
-        if perplexity is None or math.isnan(perplexity):
-            return
-
-        self._history.append(float(perplexity))
-        if len(self._history) < self.window:
-            return
-
-        avg = sum(self._history) / len(self._history)
-        if self._baseline is None:
-            self._baseline = avg
-            return
-
-        if avg > self._baseline * (1 + self.tolerance):
-            try:
-                self.engine._start_tune_worker()
-                self.engine.dataset_queue.put_nowait(None)
-            except Exception:
-                pass
-            self._baseline = avg
 
 
 class ProEngine:
@@ -126,7 +82,6 @@ class ProEngine:
         self.adapter_pool = self._load_adapters()
         self.reasoner = SymbolicReasoner()
         self.meta_controller = MetaController(self)
-        self.arch_controller = meta_controller.MetaController()
         self.layer_config: Dict[str, int] = {}
 
     def _load_adapters(self) -> Dict[str, Dict]:
@@ -258,7 +213,7 @@ class ProEngine:
         ]:
             self.state.setdefault(key, {})
         self.state.setdefault('architectures', [])
-        arch_cfg = self.arch_controller.select()
+        arch_cfg = self.meta_controller.select()
         self._apply_layer_config(arch_cfg)
         logging.info("Selected architecture: %s", arch_cfg)
         self.state['architectures'].append(arch_cfg)
@@ -1180,7 +1135,6 @@ class ProEngine:
             },
         )
         await self.meta_controller.update(resp_metrics)
-        self.arch_controller.update(resp_metrics)
         self.log(message, response, metrics)
         await self._maybe_spawn_specialist(dataset_path)
         return response, metrics

@@ -33,6 +33,9 @@ def _cosine(a: Dict[str, float], b: Dict[str, float]) -> float:
     return dot / (norm_a * norm_b)
 
 
+_external_cache: Dict[tuple[str, str, int, str], List[str]] = {}
+
+
 async def retrieve_external(
     query: str, source: str = "wikipedia", limit: int = 3
 ) -> List[str]:
@@ -40,6 +43,12 @@ async def retrieve_external(
     if not query:
         return []
     if source == "wikipedia":
+        api_url = os.getenv(
+            "WIKIPEDIA_API", "https://en.wikipedia.org/w/api.php"
+        )
+        cache_key = (source, query, limit, api_url)
+        if cache_key in _external_cache:
+            return _external_cache[cache_key]
         params = {
             "action": "opensearch",
             "search": query,
@@ -47,23 +56,26 @@ async def retrieve_external(
             "namespace": "0",
             "format": "json",
         }
-        api_url = os.getenv(
-            "WIKIPEDIA_API", "https://en.wikipedia.org/w/api.php"
-        )
-        timeout = aiohttp.ClientTimeout(
-            total=float(os.getenv("RAG_EXTERNAL_TIMEOUT", "5"))
-        )
+        timeout_val = float(os.getenv("RAG_EXTERNAL_TIMEOUT", "3"))
+        timeout = aiohttp.ClientTimeout(total=timeout_val)
         try:
             async with aiohttp.ClientSession(timeout=timeout) as session:
                 async with session.get(api_url, params=params) as resp:
                     if resp.status != 200:
-                        return []
-                    data = await resp.json()
-            return [d for d in data[2] if d]
+                        result: List[str] = []
+                    else:
+                        data = await resp.json()
+                        result = [d for d in data[2] if d]
         except asyncio.TimeoutError:
-            return []
+            result = []
+        except asyncio.CancelledError:
+            raise
+        except aiohttp.ClientError:
+            result = []
         except Exception:
-            return []
+            result = []
+        _external_cache[cache_key] = result
+        return result
     return []
 
 
@@ -108,13 +120,28 @@ async def retrieve(
                 scored.append((score, msg))
         scored.sort(key=lambda x: x[0], reverse=True)
 
-    graph_task = pro_memory.fetch_related_concepts(qwords)
-    external_task = (
-        retrieve_external(" ".join(qwords), external_source, external_limit)
-        if external_source
-        else asyncio.sleep(0, result=[])
-    )
-    graph_context, external = await asyncio.gather(graph_task, external_task)
+    graph_task = asyncio.create_task(pro_memory.fetch_related_concepts(qwords))
+    external: List[str] = []
+    if external_source:
+        external_task = asyncio.create_task(
+            retrieve_external(
+                " ".join(qwords), external_source, external_limit
+            )
+        )
+        timeout_val = float(os.getenv("RAG_EXTERNAL_TIMEOUT", "3"))
+        try:
+            external = await asyncio.wait_for(
+                external_task, timeout=timeout_val
+            )
+        except asyncio.TimeoutError:
+            external_task.cancel()
+            external = []
+        except asyncio.CancelledError:
+            external_task.cancel()
+            raise
+        except Exception:
+            external = []
+    graph_context = await graph_task
 
     combined = external + graph_context + [m for _, m in scored]
     # Deduplicate while preserving order

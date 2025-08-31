@@ -2,8 +2,9 @@ from typing import Dict, List, Optional
 
 import asyncio
 import math
-import json
-from urllib import request, parse
+import os
+
+import aiohttp
 
 from pro_metrics import tokenize, lowercase
 import pro_memory
@@ -32,34 +33,38 @@ def _cosine(a: Dict[str, float], b: Dict[str, float]) -> float:
     return dot / (norm_a * norm_b)
 
 
-def _external_search_sync(query: str, source: str, limit: int) -> List[str]:
-    """Perform a blocking search against an external knowledge source."""
-    if not query:
-        return []
-    if source == "wikipedia":
-        url = "https://en.wikipedia.org/w/api.php?" + parse.urlencode(
-            {
-                "action": "opensearch",
-                "search": query,
-                "limit": str(limit),
-                "namespace": "0",
-                "format": "json",
-            }
-        )
-        try:
-            with request.urlopen(url, timeout=5) as resp:
-                data = json.load(resp)
-            return [d for d in data[2] if d]
-        except Exception:
-            return []
-    return []
-
-
 async def retrieve_external(
     query: str, source: str = "wikipedia", limit: int = 3
 ) -> List[str]:
     """Asynchronously retrieve information from an external storage."""
-    return await asyncio.to_thread(_external_search_sync, query, source, limit)
+    if not query:
+        return []
+    if source == "wikipedia":
+        params = {
+            "action": "opensearch",
+            "search": query,
+            "limit": str(limit),
+            "namespace": "0",
+            "format": "json",
+        }
+        api_url = os.getenv(
+            "WIKIPEDIA_API", "https://en.wikipedia.org/w/api.php"
+        )
+        timeout = aiohttp.ClientTimeout(
+            total=float(os.getenv("RAG_EXTERNAL_TIMEOUT", "5"))
+        )
+        try:
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                async with session.get(api_url, params=params) as resp:
+                    if resp.status != 200:
+                        return []
+                    data = await resp.json()
+            return [d for d in data[2] if d]
+        except asyncio.TimeoutError:
+            return []
+        except Exception:
+            return []
+    return []
 
 
 async def retrieve(

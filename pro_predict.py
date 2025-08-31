@@ -224,15 +224,15 @@ async def enqueue_tokens(tokens: List[str]) -> None:
     await TOKENS_QUEUE.put(tokens)
 
 
-def suggest(word: str, topn: int = 3) -> List[str]:
+async def suggest_async(word: str, topn: int = 3) -> List[str]:
     """Return up to *topn* words semantically close to *word*.
 
     If *word* is known from the dataset, cosine similarity in the
     co-occurrence embedding space is used. For out-of-vocabulary words a
     fuzzy string match against the vocabulary is performed.
     """
-    if not _VECTORS:
-        asyncio.run(_ensure_vectors())
+
+    await _ensure_vectors()
     with _vector_lock():
         if word not in _GRAPH and word not in _VECTORS:
             return []
@@ -255,6 +255,12 @@ def suggest(word: str, topn: int = 3) -> List[str]:
             scores[other] = dot / (norm_a * norm_b)
         ordered = sorted(scores.items(), key=lambda x: x[1], reverse=True)
         return [w for w, _ in ordered[:topn]]
+
+
+def suggest(word: str, topn: int = 3) -> List[str]:
+    """Synchronous wrapper around :func:`suggest_async`."""
+
+    return asyncio.run(suggest_async(word, topn))
 
 
 def lookup_analogs(word: str) -> Optional[str]:

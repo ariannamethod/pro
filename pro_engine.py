@@ -685,9 +685,7 @@ class ProEngine:
         analog_lock = asyncio.Lock()
 
         async def _build_analog(tok: str) -> None:
-            suggestions = await asyncio.to_thread(
-                pro_predict.suggest, tok, topn=1
-            )
+            suggestions = await pro_predict.suggest_async(tok, topn=1)
             analog = suggestions[0] if suggestions else None
             if not analog:
                 analog = await asyncio.to_thread(pro_predict.lookup_analogs, tok)
@@ -999,9 +997,7 @@ class ProEngine:
         unknown: List[str] = [
             w for w in words if w not in self.state['word_counts']
         ]
-        suggest_tasks = [
-            asyncio.to_thread(pro_predict.suggest, w) for w in unknown
-        ]
+        suggest_tasks = [pro_predict.suggest_async(w) for w in unknown]
         predicted: List[str] = []
         if suggest_tasks:
             for suggestions in await asyncio.gather(*suggest_tasks):

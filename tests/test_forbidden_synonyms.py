@@ -21,7 +21,15 @@ def test_forbidden_words_replaced(tmp_path, monkeypatch):
         "bar": 4,
         "baz": 5,
     }
-    monkeypatch.setattr(pro_predict, "suggest", lambda w, topn=3: {"hello": ["hi"], "world": ["earth"]}.get(w, []))
+    async def fake_suggest_async(w, topn=3):
+        return {"hello": ["hi"], "world": ["earth"]}.get(w, [])
+
+    monkeypatch.setattr(pro_predict, "suggest_async", fake_suggest_async)
+    monkeypatch.setattr(
+        pro_predict,
+        "suggest",
+        lambda w, topn=3: asyncio.run(fake_suggest_async(w, topn)),
+    )
     monkeypatch.setattr(pro_predict, "lookup_analogs", lambda w: None)
     monkeypatch.setattr(pro_predict, "_VECTORS", {
         "hi": {"a": 1.0},

@@ -47,6 +47,10 @@ def engine(monkeypatch):
         "soon": ["shortly"],
     }
 
+    async def fake_suggest_async(w, topn=3, _m=mapping):
+        return _m.get(w.lower(), [])
+
+    monkeypatch.setattr(pro_predict, "suggest_async", fake_suggest_async)
     monkeypatch.setattr(
         pro_predict, "suggest", lambda w, topn=3, _m=mapping: _m.get(w.lower(), [])
     )

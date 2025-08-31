@@ -44,10 +44,20 @@ class MetaOptimizer:
 
 
 class SelfFineTuner:
-    """Orchestrate self-reflection and meta-optimisation cycle."""
+    """Orchestrate self-reflection and meta-optimisation cycle.
+
+    Defaults to operating on CPU and does not require external device
+    parameters.
+    """
 
     def __init__(self, model: Optional[object] = None) -> None:
+        self.device = "cpu"
         self.model = model
+        if hasattr(self.model, "to"):
+            try:  # pragma: no cover - best effort device move
+                self.model.to(self.device)
+            except Exception:
+                pass
 
     def run(self, conversations: List[str], params: Dict[str, float]) -> Dict[str, float]:
         """Detect weaknesses and propose parameter updates.

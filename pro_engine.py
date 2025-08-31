@@ -46,6 +46,7 @@ STATE_PATH = 'pro_state.json'
 HASH_PATH = 'dataset_sha.json'
 LOG_PATH = 'pro.log'
 TUNE_CONCURRENCY = 4
+SCAN_CONCURRENCY = 4
 COMPRESSION_INTERVAL = 100
 
 FORBIDDEN_ENDINGS = {"the", "a", "and", "or", "his", "my", "their"}
@@ -375,6 +376,7 @@ class ProEngine:
 
     def _start_tune_worker(self) -> None:
         if self._tune_worker_task is None or self._tune_worker_task.done():
+            self.dataset_queue = asyncio.Queue()
             self._tune_worker_task = asyncio.create_task(self._tune_worker())
             self._running_tasks.append(self._tune_worker_task)
 
@@ -410,16 +412,31 @@ class ProEngine:
             with open(weights_path, 'rb') as fh:
                 new_hashes['__weights__'] = hashlib.sha256(fh.read()).hexdigest()
         dataset_names: List[str] = []
+        paths: List[Tuple[str, str]] = []
         for name in os.listdir('datasets'):
             if name.endswith('.pkl'):
                 continue
             path = os.path.join('datasets', name)
             if not os.path.isfile(path):
                 continue
-            with open(path, 'rb') as fh:
-                digest = hashlib.sha256(fh.read()).hexdigest()
-            new_hashes[name] = digest
             dataset_names.append(name)
+            paths.append((name, path))
+
+        hash_semaphore = asyncio.Semaphore(SCAN_CONCURRENCY)
+
+        def compute_hash(p: str) -> str:
+            with open(p, 'rb') as fh:
+                return hashlib.sha256(fh.read()).hexdigest()
+
+        async def hash_file(name: str, path: str) -> Tuple[str, str, str]:
+            async with hash_semaphore:
+                digest = await asyncio.to_thread(compute_hash, path)
+                return name, digest, path
+
+        tasks = [hash_file(n, p) for n, p in paths]
+        results = await asyncio.gather(*tasks)
+        for name, digest, path in results:
+            new_hashes[name] = digest
             if old_hashes.get(name) != digest:
                 changed_files.append(path)
         removed = set(old_hashes) - set(new_hashes)

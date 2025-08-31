@@ -49,6 +49,10 @@ TUNE_CONCURRENCY = 4
 SCAN_CONCURRENCY = 4
 COMPRESSION_INTERVAL = 100
 
+# Maximum time a single dream run is allowed to execute before being
+# cancelled. This prevents runaway background tasks from piling up.
+DREAM_TIMEOUT = 30
+
 FORBIDDEN_ENDINGS = {"the", "a", "and", "or", "his", "my", "their"}
 
 
@@ -85,8 +89,10 @@ class ProEngine:
         self._tune_semaphore = asyncio.BoundedSemaphore(TUNE_CONCURRENCY)
         self._compression_task: Optional[asyncio.Task] = None
         self._dream_task: Optional[asyncio.Task] = None
+        self._dream_mode_task: Optional[asyncio.Task] = None
         self._dream_event = asyncio.Event()
         self._dream_interval = dream_interval
+        self._dream_timeout = DREAM_TIMEOUT
         self.adapter_pool = self._load_adapters()
         self.reasoner = SymbolicReasoner()
         self.light_moe = LightweightMoEBlock(dim=16, num_experts=4)
@@ -380,11 +386,23 @@ class ProEngine:
                     pass
                 idle = await self._system_idle()
                 if idle:
-                    try:
-                        await dream_mode.run(self)
-                    except Exception:
-                        pass
+                    if (
+                        self._dream_mode_task is None
+                        or self._dream_mode_task.done()
+                    ):
+                        async def _run_dream() -> None:
+                            try:
+                                await asyncio.wait_for(
+                                    dream_mode.run(self),
+                                    timeout=self._dream_timeout,
+                                )
+                            except Exception:
+                                pass
+
+                        self._dream_mode_task = asyncio.create_task(_run_dream())
         except asyncio.CancelledError:
+            if self._dream_mode_task is not None:
+                self._dream_mode_task.cancel()
             pass
 
     def _start_tune_worker(self) -> None:
@@ -524,6 +542,9 @@ class ProEngine:
             task.cancel()
         if self._running_tasks:
             await asyncio.gather(*self._running_tasks, return_exceptions=True)
+        if self._dream_mode_task is not None and not self._dream_mode_task.done():
+            self._dream_mode_task.cancel()
+            await asyncio.gather(self._dream_mode_task, return_exceptions=True)
         await pro_predict.wait_save_task()
         await pro_meta.wait_recompute()
 

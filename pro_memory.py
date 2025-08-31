@@ -10,9 +10,20 @@ from memory import MemoryStore
 
 DB_PATH = 'pro_memory.db'
 
+_MIN_TOKENS = 2
+_BLACKLIST_PATTERNS = [re.compile(r'^v\d+\.\d+$', re.IGNORECASE)]
+
 
 _STORE: MemoryStore | None = None
 _ADAPTER_USAGE: Dict[str, int] = {}
+
+
+def _is_short(content: str) -> bool:
+    return len(re.findall(r"\w+", content)) < _MIN_TOKENS
+
+
+def _is_blacklisted(content: str) -> bool:
+    return any(p.fullmatch(content) for p in _BLACKLIST_PATTERNS)
 
 
 async def init_db() -> None:
@@ -147,7 +158,7 @@ async def add_message(content: str, tag: Optional[str] = None) -> None:
 
 
 async def store_if_novel(
-    content: str, threshold: float = 0.1, tag: Optional[str] = None
+    content: str, threshold: float = 0.3, tag: Optional[str] = None
 ) -> bool:
     """Store ``content`` only if it is sufficiently different.
 
@@ -162,6 +173,10 @@ async def store_if_novel(
     Returns:
         ``True`` if the message was stored, ``False`` otherwise.
     """
+    content = content.strip()
+    if _is_short(content) or _is_blacklisted(content):
+        return False
+
     if _STORE is None or _STORE.embeddings.shape[0] == 0:
         await build_index()
 

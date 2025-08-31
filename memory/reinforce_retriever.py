@@ -1,7 +1,7 @@
 """Policy gradient memory retriever.
 
 This module implements :class:`ReinforceRetriever`, a minimal reinforcement
-learning policy that selects a memory node from ``MemoryGraphStore`` using the
+learning policy that selects a memory node from ``MemoryStore`` using the
 REINFORCE algorithm.  Memory texts are encoded into fixed-size vectors and a
 softmax over a learnable weight vector produces a probability distribution over
 nodes.  During retrieval the expected memory vector weighted by these
@@ -17,13 +17,13 @@ from typing import Optional, Tuple
 import numpy as np
 
 from morphology import encode as encode_morph
-from .memory_graph import MemoryGraphStore
+from .store import MemoryStore
 
 
 class ReinforceRetriever:
     """Select memory nodes using a lightweight policy gradient."""
 
-    def __init__(self, store: MemoryGraphStore, dim: int = 32, lr: float = 0.1) -> None:
+    def __init__(self, store: MemoryStore, dim: int = 32, lr: float = 0.1) -> None:
         self.store = store
         self.dim = dim
         self.lr = lr
@@ -53,8 +53,8 @@ class ReinforceRetriever:
 
         vecs = np.stack(
             [
-                np.array(n.morph_codes, dtype=np.float32)
-                if n.morph_codes
+                np.array(getattr(n, "morph_codes", None), dtype=np.float32)
+                if getattr(n, "morph_codes", None) is not None
                 else self._encode(n.text)
                 for n in nodes
             ]

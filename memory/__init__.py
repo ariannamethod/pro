@@ -1,6 +1,6 @@
 """Memory helpers and retrievers."""
 
-from .memory_graph import MemoryGraphStore, GraphRetriever
+from .store import MemoryStore, GraphRetriever
 from .reinforce_retriever import ReinforceRetriever
 
-__all__ = ["MemoryGraphStore", "GraphRetriever", "ReinforceRetriever"]
+__all__ = ["MemoryStore", "GraphRetriever", "ReinforceRetriever"]

@@ -1,5 +1,5 @@
-import numpy as np
 import asyncio
+import numpy as np
 
 # Simple deterministic "mini-SIAMESE" style embedding generator.
 # This is intentionally lightweight so tests do not require heavy models.
@@ -8,7 +8,7 @@ _RNG = np.random.default_rng(0)
 _W = (
     _RNG.normal(size=(256, _DIM)) + 1j * _RNG.normal(size=(256, _DIM))
 ).astype(np.complex64)
-_LOCK = asyncio.Lock()
+_W.flags.writeable = False
 
 
 def _char_vector(text: str) -> np.ndarray:
@@ -20,14 +20,16 @@ def _char_vector(text: str) -> np.ndarray:
 
 async def embed_sentence(text: str) -> np.ndarray:
     """Return a normalized embedding for given text."""
-    async with _LOCK:
-        # embedding = char histogram projected via fixed random matrix
-        vec = _char_vector(text).astype(np.complex64)
-        emb = vec @ _W
-        norm = np.linalg.norm(emb)
-        if norm:
-            emb = emb / norm
-        return emb.astype(np.complex64)
+    vec = _char_vector(text).astype(np.complex64)
+    return await asyncio.to_thread(_project, vec)
+
+
+def _project(vec: np.ndarray) -> np.ndarray:
+    emb = vec @ _W
+    norm = np.linalg.norm(emb)
+    if norm:
+        emb = emb / norm
+    return emb.astype(np.complex64)
 
 
 async def extract_entities_relations(text: str):

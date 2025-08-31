@@ -641,7 +641,9 @@ class ProEngine:
         )
         forbidden = {w.lower() for w in (forbidden or set())}
         analog_map: Dict[str, str] = {}
-        for tok in forbidden:
+        analog_lock = asyncio.Lock()
+
+        async def _build_analog(tok: str) -> None:
             suggestions = await asyncio.to_thread(
                 pro_predict.suggest, tok, topn=1
             )
@@ -649,7 +651,10 @@ class ProEngine:
             if not analog:
                 analog = await asyncio.to_thread(pro_predict.lookup_analogs, tok)
             if analog:
-                analog_map[tok] = analog
+                async with analog_lock:
+                    analog_map[tok] = analog
+
+        await asyncio.gather(*(_build_analog(tok) for tok in forbidden))
         ordered_vocab: List[str] = []
         seen_vocab: Set[str] = set()
         for w, _ in sorted(vocab.items(), key=lambda x: x[1], reverse=True):
@@ -704,15 +709,17 @@ class ProEngine:
             target_length = await asyncio.to_thread(target_length_from_metrics, metrics)
             words: List[str] = []
             tracker: Set[str] = set()
-            for w in attempt_seeds:
-                analog = (
-                    await asyncio.to_thread(pro_predict.lookup_analogs, w.lower())
-                    or w
-                )
+
+            async def _lookup_seed(w: str) -> Tuple[str, str]:
+                analog = await asyncio.to_thread(pro_predict.lookup_analogs, w.lower()) or w
                 if w.isupper():
                     analog = analog.upper()
                 elif w and w[0].isupper():
                     analog = analog[0].upper() + analog[1:]
+                return w, analog
+
+            seed_results = await asyncio.gather(*(_lookup_seed(w) for w in attempt_seeds))
+            for _, analog in seed_results:
                 if analog and analog.lower() not in forbidden and analog not in tracker:
                     words.append(analog)
                     tracker.add(analog)
@@ -724,8 +731,13 @@ class ProEngine:
                     continue
                 w = analog_map.get(lw, w)
                 combined_counts[w] = combined_counts.get(w, 0) + weight
-            for w in high_inv_words:
+
+            async def _lookup_inv(w: str) -> Tuple[str, Optional[str]]:
                 analog = await asyncio.to_thread(pro_predict.lookup_analogs, w)
+                return w, analog
+
+            inv_results = await asyncio.gather(*(_lookup_inv(w) for w in high_inv_words))
+            for w, analog in inv_results:
                 if analog:
                     combined_counts[analog] = (
                         combined_counts.get(analog, 0.0)
@@ -993,10 +1005,6 @@ class ProEngine:
                 tokens.extend(lowercase(tokenize(text)))
             return tokens
 
-        mem_tokens = await asyncio.to_thread(
-            _gather_tokens, recent_msgs + recent_resps
-        )
-
         def _load_data_tokens() -> List[str]:
             tokens: List[str] = []
             if os.path.exists("datasets"):
@@ -1014,7 +1022,13 @@ class ProEngine:
                         continue
             return tokens
 
-        data_tokens = await asyncio.to_thread(_load_data_tokens)
+        mem_tokens_task = asyncio.to_thread(
+            _gather_tokens, recent_msgs + recent_resps
+        )
+        data_tokens_task = asyncio.to_thread(_load_data_tokens)
+        mem_tokens, data_tokens = await asyncio.gather(
+            mem_tokens_task, data_tokens_task
+        )
 
         def _combine_vocab(
             mem_tokens: List[str], data_tokens: List[str]

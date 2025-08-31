@@ -8,7 +8,6 @@ import random
 import re
 import importlib.util
 import sys
-import subprocess
 from typing import Dict, List, Tuple, Set, Optional
 from collections import Counter, deque
 
@@ -297,7 +296,7 @@ class ProEngine:
         if self._dream_task is None or self._dream_task.done():
             self._dream_task = asyncio.create_task(self._dream_worker())
 
-    def _system_idle(self) -> bool:
+    async def _system_idle(self) -> bool:
         try:
             load = os.getloadavg()[0] / max(1, os.cpu_count() or 1)
         except OSError:
@@ -305,14 +304,14 @@ class ProEngine:
         if load > 0.2:
             return False
         try:
-            out = subprocess.check_output(
-                [
-                    "nvidia-smi",
-                    "--query-gpu=utilization.gpu",
-                    "--format=csv,noheader,nounits",
-                ],
-                stderr=subprocess.DEVNULL,
+            proc = await asyncio.create_subprocess_exec(
+                "nvidia-smi",
+                "--query-gpu=utilization.gpu",
+                "--format=csv,noheader,nounits",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.DEVNULL,
             )
+            out, _ = await proc.communicate()
             util = int(out.decode().splitlines()[0])
             if util > 10:
                 return False
@@ -324,7 +323,7 @@ class ProEngine:
         try:
             while True:
                 await asyncio.sleep(5)
-                if self._system_idle():
+                if await self._system_idle():
                     try:
                         await dream_mode.run(self)
                     except Exception:

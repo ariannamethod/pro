@@ -525,6 +525,7 @@ class ProEngine:
         if self._running_tasks:
             await asyncio.gather(*self._running_tasks, return_exceptions=True)
         await pro_predict.wait_save_task()
+        await pro_meta.wait_recompute()
 
     def compute_charged_words(self, words: List[str]) -> List[str]:
         word_counts = Counter(words)

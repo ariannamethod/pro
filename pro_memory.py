@@ -16,6 +16,9 @@ _BLACKLIST_PATTERNS = [re.compile(r'^v\d+\.\d+$', re.IGNORECASE)]
 
 _STORE: MemoryStore | None = None
 _ADAPTER_USAGE: Dict[str, int] = {}
+COMPRESSION_INTERVAL = 100
+COMPRESSION_EVENT = asyncio.Event()
+_TOTAL_ADAPTER_USAGE = 0
 
 
 def _is_short(content: str) -> bool:
@@ -104,7 +107,9 @@ async def close_db() -> None:
 
 async def increment_adapter_usage(name: str) -> None:
     """Increment usage counter for a specific adapter."""
+    global _TOTAL_ADAPTER_USAGE
     _ADAPTER_USAGE[name] = _ADAPTER_USAGE.get(name, 0) + 1
+    _TOTAL_ADAPTER_USAGE += 1
     async with get_connection() as conn:
         await conn.execute(
             "INSERT INTO adapter_usage(adapter, count) VALUES (?, 1) "
@@ -112,6 +117,8 @@ async def increment_adapter_usage(name: str) -> None:
             (name,),
         )
         await conn.commit()
+    if _TOTAL_ADAPTER_USAGE >= COMPRESSION_INTERVAL:
+        COMPRESSION_EVENT.set()
 
 
 async def total_adapter_usage() -> int:
@@ -126,7 +133,10 @@ async def total_adapter_usage() -> int:
 
 async def reset_adapter_usage() -> None:
     """Clear all adapter usage counters."""
+    global _TOTAL_ADAPTER_USAGE
     _ADAPTER_USAGE.clear()
+    _TOTAL_ADAPTER_USAGE = 0
+    COMPRESSION_EVENT.clear()
     async with get_connection() as conn:
         await conn.execute("DELETE FROM adapter_usage")
         await conn.commit()

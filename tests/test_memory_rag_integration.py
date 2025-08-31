@@ -108,3 +108,21 @@ async def test_store_if_novel_skips_duplicates(engine):
 
     result = await pro_rag.retrieve(["repeat"])
     assert result == ["repeat twice"]
+
+
+@pytest.mark.asyncio
+async def test_store_if_novel_skips_short_strings(engine):
+    stored = await pro_memory.store_if_novel("hi")
+    assert stored is False
+
+    messages = await pro_memory.fetch_recent_messages()
+    assert [m for m, _ in messages] == []
+
+
+@pytest.mark.asyncio
+async def test_store_if_novel_skips_version_strings(engine):
+    stored = await pro_memory.store_if_novel("V1.0")
+    assert stored is False
+
+    messages = await pro_memory.fetch_recent_messages()
+    assert [m for m, _ in messages] == []

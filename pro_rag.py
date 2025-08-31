@@ -108,12 +108,13 @@ async def retrieve(
                 scored.append((score, msg))
         scored.sort(key=lambda x: x[0], reverse=True)
 
-    graph_context = await pro_memory.fetch_related_concepts(qwords)
-    external: List[str] = []
-    if external_source:
-        external = await retrieve_external(
-            " ".join(qwords), external_source, external_limit
-        )
+    graph_task = pro_memory.fetch_related_concepts(qwords)
+    external_task = (
+        retrieve_external(" ".join(qwords), external_source, external_limit)
+        if external_source
+        else asyncio.sleep(0, result=[])
+    )
+    graph_context, external = await asyncio.gather(graph_task, external_task)
 
     combined = external + graph_context + [m for _, m in scored]
     # Deduplicate while preserving order

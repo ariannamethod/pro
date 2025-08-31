@@ -86,6 +86,10 @@ Phrase collections stored for training runs. They form the base for learning cyc
 
 Streams file changes to the engine without blocking. New lines appear as soon as they are saved. It also streamlines future extensions.
 
+### Dream Mode
+
+Generates synthetic dialogues in the background to keep the model fresh. Each run is timed and recorded for latency metrics. On resource‑constrained systems this worker can introduce extra load; disable it with `--no-dream-worker` or schedule runs explicitly with `--dream-schedule <seconds>`.
+
 ### Caching and Pooling
 
 Shared helpers keep memory operations efficient under load. The engine calls them for every memory task. This choice facilitates ongoing refinement.

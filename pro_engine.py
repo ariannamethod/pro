@@ -64,6 +64,8 @@ class ProEngine:
         saliency_threshold: float = 0.0,
         novelty_threshold: float = 0.9,
         dream_interval: float = 0.5,
+        enable_dream_worker: bool = True,
+        dream_schedule: float | None = None,
     ) -> None:
         self.state: Dict = {
             'word_counts': {},
@@ -93,6 +95,8 @@ class ProEngine:
         self._dream_event = asyncio.Event()
         self._dream_interval = dream_interval
         self._dream_timeout = DREAM_TIMEOUT
+        self._enable_dream_worker = enable_dream_worker
+        self._dream_schedule = dream_schedule
         self.adapter_pool = self._load_adapters()
         self.reasoner = SymbolicReasoner()
         self.light_moe = LightweightMoEBlock(dim=16, num_experts=4)
@@ -344,6 +348,8 @@ class ProEngine:
         self._start_dream_worker()
 
     def _start_dream_worker(self) -> None:
+        if not self._enable_dream_worker:
+            return
         if self._dream_task is None or self._dream_task.done():
             self._dream_task = asyncio.create_task(self._dream_worker())
             self._running_tasks.append(self._dream_task)
@@ -377,29 +383,33 @@ class ProEngine:
     async def _dream_worker(self) -> None:
         try:
             while True:
-                try:
-                    await asyncio.wait_for(
-                        self._dream_event.wait(), timeout=self._dream_interval
-                    )
-                    self._dream_event.clear()
-                except asyncio.TimeoutError:
-                    pass
-                idle = await self._system_idle()
-                if idle:
-                    if (
-                        self._dream_mode_task is None
-                        or self._dream_mode_task.done()
-                    ):
-                        async def _run_dream() -> None:
-                            try:
-                                await asyncio.wait_for(
-                                    dream_mode.run(self),
-                                    timeout=self._dream_timeout,
-                                )
-                            except Exception:
-                                pass
+                if self._dream_schedule is not None:
+                    await asyncio.sleep(self._dream_schedule)
+                else:
+                    try:
+                        await asyncio.wait_for(
+                            self._dream_event.wait(), timeout=self._dream_interval
+                        )
+                        self._dream_event.clear()
+                    except asyncio.TimeoutError:
+                        pass
+                    idle = await self._system_idle()
+                    if not idle:
+                        continue
+                if (
+                    self._dream_mode_task is None
+                    or self._dream_mode_task.done()
+                ):
+                    async def _run_dream() -> None:
+                        try:
+                            await asyncio.wait_for(
+                                dream_mode.run(self),
+                                timeout=self._dream_timeout,
+                            )
+                        except Exception:
+                            pass
 
-                        self._dream_mode_task = asyncio.create_task(_run_dream())
+                    self._dream_mode_task = asyncio.create_task(_run_dream())
         except asyncio.CancelledError:
             if self._dream_mode_task is not None:
                 self._dream_mode_task.cancel()
@@ -1324,7 +1334,22 @@ if __name__ == '__main__':
         default=0.0,
         help="Percentile for dropping low-importance tokens before attention",
     )
+    parser.add_argument(
+        "--no-dream-worker",
+        action="store_true",
+        help="Disable background dream worker",
+    )
+    parser.add_argument(
+        "--dream-schedule",
+        type=float,
+        default=None,
+        help="Run dream mode on a fixed schedule in seconds",
+    )
     args = parser.parse_args()
     asyncio.run(
-        ProEngine(saliency_threshold=args.saliency_threshold).interact()
+        ProEngine(
+            saliency_threshold=args.saliency_threshold,
+            enable_dream_worker=not args.no_dream_worker,
+            dream_schedule=args.dream_schedule,
+        ).interact()
     )

@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING
 
 import pro_memory
 from trainer import Trainer
+from metrics.timing import timed
 
 try:  # Optional YAML support
     import yaml  # type: ignore
@@ -65,6 +66,7 @@ def _simulate_dialogue(
     return dialogue
 
 
+@timed(name="dream_mode.run")
 async def run(
     engine: ProEngine, turns: int = 3, data_path: str | None = None
 ) -> None:

@@ -1,4 +1,5 @@
 import numpy as np
+import pytest
 
 from quantum.attention_backend import QuantumAttentionBackend
 from router.policy import PatchRoutingPolicy
@@ -6,6 +7,8 @@ from transformers.modeling_transformer import QuantumHybridAttention
 
 
 def test_quantum_hybrid_attention_routes():
+    pytest.importorskip("qiskit")
+    pytest.importorskip("qiskit_aer")
     backend = QuantumAttentionBackend(shots=16)
     policy = PatchRoutingPolicy(dim=1, seed=0)
     attention = QuantumHybridAttention(policy, backend)

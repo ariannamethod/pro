@@ -1,10 +1,11 @@
-"""Tiny transformer-like module with optional fractal adapter."""
+"""Tiny transformer-like module with optional adapters and memristor memory."""
 
 from __future__ import annotations
 
 import numpy as np
 
 from adapters.fractal_adapter import FractalAdapter
+from memory.memristor_cell import MemristorCell
 
 
 class Transformer:
@@ -15,6 +16,7 @@ class Transformer:
         dim: int,
         use_fractal_adapter: bool = False,
         fractal_depth: int = 1,
+        use_memristor: bool = False,
     ) -> None:
         self.dim = dim
         self.use_fractal_adapter = use_fractal_adapter
@@ -22,13 +24,18 @@ class Transformer:
         self.adapter = None
         if use_fractal_adapter:
             self.adapter = FractalAdapter(fractal_depth)
+        self.memristor = MemristorCell() if use_memristor else None
 
     def forward(self, hidden_states: np.ndarray) -> np.ndarray:
-        """Return hidden states enriched with adapter signal when enabled."""
+        """Return hidden states enriched with optional adapter and memristor."""
 
-        if self.adapter is None:
-            return hidden_states
-        adapter_vec = self.adapter(hidden_states.shape[-1])
-        return hidden_states + adapter_vec
+        output = hidden_states
+        if self.adapter is not None:
+            adapter_vec = self.adapter(hidden_states.shape[-1])
+            output = output + adapter_vec
+        if self.memristor is not None:
+            resistance = self.memristor.step(float(np.mean(output)))
+            output = output * resistance
+        return output
 
     __call__ = forward

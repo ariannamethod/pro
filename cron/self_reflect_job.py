@@ -22,11 +22,16 @@ INTERVAL_SECONDS = int(os.getenv("SELF_REFLECT_INTERVAL", "86400"))
 
 def run_cycle(conversations: Optional[List[str]] = None) -> None:
     """Run a single self-reflection cycle with optional GPU limits."""
-    if torch is not None and torch.cuda.is_available():
+    if (
+        torch is not None
+        and hasattr(torch, "cuda")
+        and torch.cuda.is_available()
+    ):
         os.environ.setdefault("CUDA_VISIBLE_DEVICES", "0")
         torch.cuda.set_per_process_memory_fraction(GPU_FRACTION, 0)
         tuner = SelfFineTuner()
     else:  # CPU-only path when torch or CUDA is unavailable
+        os.environ.pop("CUDA_VISIBLE_DEVICES", None)
         tuner = SelfFineTuner()
     tuner.run(conversations or [])
 

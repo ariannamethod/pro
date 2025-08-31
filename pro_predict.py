@@ -27,6 +27,8 @@ _VECTORS: Dict[str, Dict[str, float]] = {}
 _SYNONYMS: Dict[str, str] = {}
 _LOCK = threading.RLock()
 _SAVE_TASK: Optional[asyncio.Task] = None
+_FLUSH_TASK: Optional[asyncio.Task] = None
+FLUSH_INTERVAL = float(os.getenv("SAVE_FLUSH_INTERVAL", "5"))
 
 
 @contextlib.contextmanager
@@ -165,6 +167,12 @@ async def wait_save_task() -> None:
         _SAVE_TASK = None
 
 
+async def _flush_worker() -> None:
+    while True:
+        await asyncio.sleep(FLUSH_INTERVAL)
+        await wait_save_task()
+
+
 @timed
 async def update(word_list: List[str]) -> None:
     """Update the co-occurrence graph and vectors with new words.
@@ -172,7 +180,7 @@ async def update(word_list: List[str]) -> None:
     The *word_list* should contain individual tokens. After the update the
     words become part of the internal vocabulary used by :func:`suggest`.
     """
-    global _VECTORS, _SAVE_TASK
+    global _VECTORS, _SAVE_TASK, _FLUSH_TASK
     await _ensure_vectors()
     with _vector_lock():
         words = lowercase(word_list)
@@ -184,7 +192,8 @@ async def update(word_list: List[str]) -> None:
                 _GRAPH.setdefault(word, Counter())[other] += 1
                 _GRAPH.setdefault(other, Counter())[word] += 1
         _VECTORS = _build_embeddings(_GRAPH)
-    await wait_save_task()
+    if _FLUSH_TASK is None:
+        _FLUSH_TASK = asyncio.create_task(_flush_worker())
     _SAVE_TASK = asyncio.create_task(
         asyncio.to_thread(save_embeddings, _GRAPH, _VECTORS)
     )
@@ -337,7 +346,9 @@ class MiniSelfAttention:
             gate_bias=self.gate.bias if self.gate else np.zeros(self.dim),
         )
 
-    def train_step(self, tokens: List[str], target: str, lr: float = 0.1) -> None:
+    def train_step(
+        self, tokens: List[str], target: str, lr: float = 0.1
+    ) -> None:
         ids = [self.vocab.index(t) for t in tokens if t in self.vocab]
         if not ids or target not in self.vocab:
             return
@@ -363,7 +374,9 @@ class MiniSelfAttention:
         self.w_o -= lr * np.outer(pooled, grad)
 
     def logits(
-        self, tokens: List[str], adapters: Optional[List[Dict[str, float]]] = None
+        self,
+        tokens: List[str],
+        adapters: Optional[List[Dict[str, float]]] = None,
     ) -> Dict[str, float]:
         ids = [self.vocab.index(t) for t in tokens if t in self.vocab]
         if not ids:

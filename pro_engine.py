@@ -58,6 +58,7 @@ class ProEngine:
         similarity_threshold: float = 0.3,
         saliency_threshold: float = 0.0,
         novelty_threshold: float = 0.9,
+        dream_interval: float = 0.5,
     ) -> None:
         self.state: Dict = {
             'word_counts': {},
@@ -83,6 +84,8 @@ class ProEngine:
         self._tune_semaphore = asyncio.BoundedSemaphore(TUNE_CONCURRENCY)
         self._compression_task: Optional[asyncio.Task] = None
         self._dream_task: Optional[asyncio.Task] = None
+        self._dream_event = asyncio.Event()
+        self._dream_interval = dream_interval
         self.adapter_pool = self._load_adapters()
         self.reasoner = SymbolicReasoner()
         self.light_moe = LightweightMoEBlock(dim=16, num_experts=4)
@@ -354,7 +357,13 @@ class ProEngine:
     async def _dream_worker(self) -> None:
         try:
             while True:
-                await asyncio.sleep(5)
+                try:
+                    await asyncio.wait_for(
+                        self._dream_event.wait(), timeout=self._dream_interval
+                    )
+                    self._dream_event.clear()
+                except asyncio.TimeoutError:
+                    pass
                 idle = await self._system_idle()
                 if idle:
                     try:

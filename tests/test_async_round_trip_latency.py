@@ -2,6 +2,7 @@ import os
 import sys
 import time
 import logging
+import asyncio
 
 import pytest
 
@@ -9,6 +10,7 @@ sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 
 import pro_memory  # noqa: E402
 import pro_rag  # noqa: E402
+from pro_engine import ProEngine, dream_mode  # noqa: E402
 
 
 logging.basicConfig(level=logging.INFO)
@@ -62,3 +64,26 @@ async def test_round_trip_latency_benchmark():
     await pro_memory.close_db()
     if os.path.exists(pro_memory.DB_PATH):
         os.remove(pro_memory.DB_PATH)
+
+
+@pytest.mark.asyncio
+async def test_dream_worker_quick_startup(monkeypatch):
+    trigger = asyncio.Event()
+
+    async def fake_run(engine: ProEngine) -> None:
+        trigger.set()
+
+    monkeypatch.setattr(dream_mode, "run", fake_run)
+
+    async def always_idle(self: ProEngine) -> bool:  # type: ignore[override]
+        return True
+
+    monkeypatch.setattr(ProEngine, "_system_idle", always_idle)
+
+    engine = ProEngine(dream_interval=0.1)
+    engine._start_dream_worker()
+    start = time.perf_counter()
+    await asyncio.wait_for(trigger.wait(), timeout=1.0)
+    elapsed = time.perf_counter() - start
+    assert elapsed < 1.0
+    await engine.shutdown()

@@ -1,7 +1,7 @@
 """Simple training loop with layer evaluation and time folding."""
 import json
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 import numpy as np
 from autoadapt import LayerMutator, MetricMonitor
@@ -11,6 +11,11 @@ from transformers.time_fold import TimeFoldTransformer
 from pro_forecast import simulate_paths, backpropagate_forecast
 from resonance.p2p_resonance import P2PResonance
 from self_reflect.trainer import SelfFineTuner
+
+# Pairs of layer names whose gradients should mirror each other during
+# self-reflection.  Layers listed here will have their weights blended
+# symmetrically by :class:`~self_reflect.SelfFineTuner` after each cycle.
+fractal_links: List[Tuple[str, str]] = []
 
 
 class Trainer:

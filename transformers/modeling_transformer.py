@@ -15,6 +15,7 @@ from __future__ import annotations
 from typing import Callable, Optional, Sequence, Union
 
 import ast
+import json
 
 import numpy as np
 import morphology
@@ -197,6 +198,65 @@ class MemoryAttention:
         if _kernel is not None:
             return _phase_magnitude_add(_kernel(hidden_states, mem_vec), harmonic)
         return _phase_magnitude_add(hidden_states, mem_vec, harmonic)
+
+
+class HotSwapLoRAAdapter:
+    """Dynamically apply LoRA weight deltas to model layers.
+
+    The adapter keeps track of currently active deltas for each layer. When
+    new weights are loaded the previous deltas are removed before applying the
+    fresh ones, enabling "hot" swapping without restarting the process.
+
+    Only very small weight matrices are expected which keeps the
+    implementation intentionally lightweight. Layers are addressed by name and
+    the wrapped *model* is expected to expose attributes with the same names
+    (e.g. ``attention`` or ``ffn``).
+    """
+
+    def __init__(self, model) -> None:  # pragma: no cover - simple wiring
+        self.model = model
+        self.active: dict[str, np.ndarray] = {}
+
+    # -- Loading ---------------------------------------------------------
+    def _apply(self, deltas: dict[str, np.ndarray]) -> None:
+        for name, delta in deltas.items():
+            if not hasattr(self.model, name):
+                continue
+            weight = getattr(self.model, name)
+            # remove previous delta if present
+            if name in self.active:
+                weight = weight - self.active[name]
+            setattr(self.model, name, weight + delta)
+            self.active[name] = delta
+
+    def load_from_dict(self, weights: dict[str, list[list[float]]]) -> None:
+        """Load LoRA deltas from an in-memory mapping."""
+        deltas = {k: np.asarray(v, dtype=np.float32) for k, v in weights.items()}
+        self._apply(deltas)
+
+    def load_from_file(self, path: str) -> None:
+        """Load LoRA deltas from a JSON file."""
+        with open(path, "r", encoding="utf-8") as fh:
+            data = json.load(fh)
+        self.load_from_dict(data)
+
+    def load_from_s3(self, bucket: str, key: str) -> None:
+        """Fetch LoRA deltas from S3 and apply them.
+
+        Requires :mod:`boto3`; the dependency is imported lazily so that the
+        rest of the project can run without it.
+        """
+
+        try:  # pragma: no cover - network interaction
+            import boto3
+        except Exception as exc:  # pragma: no cover
+            raise ImportError("boto3 is required for S3 loading") from exc
+
+        s3 = boto3.client("s3")
+        obj = s3.get_object(Bucket=bucket, Key=key)
+        content = obj["Body"].read().decode("utf-8")
+        data = json.loads(content)
+        self.load_from_dict(data)
 
 
 class QuantumHybridAttention:

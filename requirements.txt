@@ -6,3 +6,5 @@ watchfiles
 qiskit
 autograd
 aiohttp
+fastapi
+boto3

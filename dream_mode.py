@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
+import logging
 import random
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -69,6 +71,14 @@ async def run(
     """Generate dialogue and route through the training loop."""
     dialogue = _simulate_dialogue(turns, data_path=data_path)
     trainer = Trainer()
-    trainer.evolve("dream", dialogue, metric=1.0)
+    try:
+        await asyncio.wait_for(
+            asyncio.to_thread(trainer.evolve, "dream", dialogue, metric=1.0),
+            timeout=10,
+        )
+    except asyncio.TimeoutError:
+        logging.warning("Trainer.evolve timed out")
+    except Exception as exc:
+        logging.error("Trainer.evolve failed: %s", exc)
     for line in dialogue:
         await pro_memory.add_message(line, tag="dream")

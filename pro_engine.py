@@ -651,6 +651,7 @@ class ProEngine:
         best_seq = beams[0][0] if beams else start_seq
         return best_seq[:target_length]
 
+    @timed
     async def respond(
         self,
         seeds: List[str],
@@ -660,7 +661,10 @@ class ProEngine:
         forbidden: Optional[Set[str]] = None,
         update_meta: bool = True,
     ) -> str:
+        start_time = time.perf_counter()
         if not seeds:
+            duration = time.perf_counter() - start_time
+            logging.info("respond took %.2fs", duration)
             return "Silence echoes within void."
 
         best = pro_meta.best_params()
@@ -712,18 +716,39 @@ class ProEngine:
             elif w and w[0].isupper():
                 repl = repl[0].upper() + repl[1:]
             attempt_seeds.append(repl)
-        asyncio.create_task(self._forecast(attempt_seeds))
         extra_idx = 0
         while True:
-            # ----- First sentence -----
-            metrics = await asyncio.to_thread(
-                compute_metrics,
-                [w.lower() for w in attempt_seeds if w],
-                self.state.get("trigram_counts", {}),
-                self.state.get("bigram_counts", {}),
-                self.state.get("word_counts", {}),
-                self.state.get("char_ngram_counts", {}),
-            )
+            def _metrics_and_length() -> Tuple[Dict, int]:
+                tokens = [w.lower() for w in attempt_seeds if w]
+                metrics_local = compute_metrics(
+                    tokens,
+                    self.state.get("trigram_counts", {}),
+                    self.state.get("bigram_counts", {}),
+                    self.state.get("word_counts", {}),
+                    self.state.get("char_ngram_counts", {}),
+                )
+                return metrics_local, target_length_from_metrics(metrics_local)
+
+            async def _lookup_seeds() -> List[Tuple[str, str]]:
+                async def _lookup_seed(w: str) -> Tuple[str, str]:
+                    analog = await asyncio.to_thread(
+                        pro_predict.lookup_analogs, w.lower()
+                    ) or w
+                    if w.isupper():
+                        analog = analog.upper()
+                    elif w and w[0].isupper():
+                        analog = analog[0].upper() + analog[1:]
+                    return w, analog
+
+                return await asyncio.gather(*(_lookup_seed(w) for w in attempt_seeds))
+
+            async with asyncio.TaskGroup() as tg:
+                metrics_task = tg.create_task(asyncio.to_thread(_metrics_and_length))
+                seed_task = tg.create_task(_lookup_seeds())
+                tg.create_task(self._forecast(attempt_seeds))
+
+            metrics, target_length = metrics_task.result()
+            seed_results = seed_task.result()
             bigram_inv = self.state.get("bigram_inv", {})
             trigram_inv = self.state.get("trigram_inv", {})
             inv_scores: Dict[str, float] = {}
@@ -743,19 +768,8 @@ class ProEngine:
                 w for w, v in inv_scores.items() if v == max_inv and v > 0.0
             }
 
-            target_length = await asyncio.to_thread(target_length_from_metrics, metrics)
             words: List[str] = []
             tracker: Set[str] = set()
-
-            async def _lookup_seed(w: str) -> Tuple[str, str]:
-                analog = await asyncio.to_thread(pro_predict.lookup_analogs, w.lower()) or w
-                if w.isupper():
-                    analog = analog.upper()
-                elif w and w[0].isupper():
-                    analog = analog[0].upper() + analog[1:]
-                return w, analog
-
-            seed_results = await asyncio.gather(*(_lookup_seed(w) for w in attempt_seeds))
             for _, analog in seed_results:
                 if analog and analog.lower() not in forbidden and analog not in tracker:
                     words.append(analog)
@@ -813,25 +827,33 @@ class ProEngine:
             await pro_predict._ensure_vectors()
             vectors = pro_predict._VECTORS
 
-            def _cos(a: Dict[str, float], b: Dict[str, float]) -> float:
-                keys = set(a) | set(b)
-                dot = sum(a.get(k, 0.0) * b.get(k, 0.0) for k in keys)
-                na = math.sqrt(sum(v * v for v in a.values()))
-                nb = math.sqrt(sum(v * v for v in b.values()))
-                if na == 0 or nb == 0:
-                    return 0.0
-                return dot / (na * nb)
+            def _compute_scores(
+                first_words: List[str], tracker: Set[str], vectors: Dict[str, Dict[str, float]]
+            ) -> Dict[str, float]:
+                def _cos(a: Dict[str, float], b: Dict[str, float]) -> float:
+                    keys = set(a) | set(b)
+                    dot = sum(a.get(k, 0.0) * b.get(k, 0.0) for k in keys)
+                    na = math.sqrt(sum(v * v for v in a.values()))
+                    nb = math.sqrt(sum(v * v for v in b.values()))
+                    if na == 0 or nb == 0:
+                        return 0.0
+                    return dot / (na * nb)
 
-            first_vecs = [vectors[w] for w in first_words if w in vectors]
-            scores: Dict[str, float] = {}
-            for word, vec in vectors.items():
-                if word in tracker:
-                    continue
-                if first_vecs:
-                    sim = max(_cos(vec, fv) for fv in first_vecs)
-                else:
-                    sim = 0.0
-                scores[word] = sim
+                first_vecs = [vectors[w] for w in first_words if w in vectors]
+                scores_local: Dict[str, float] = {}
+                for word, vec in vectors.items():
+                    if word in tracker:
+                        continue
+                    if first_vecs:
+                        sim = max(_cos(vec, fv) for fv in first_vecs)
+                    else:
+                        sim = 0.0
+                    scores_local[word] = sim
+                return scores_local
+
+            scores = await asyncio.to_thread(
+                _compute_scores, first_words, tracker, vectors
+            )
             sim_thresh = similarity_threshold
             eligible = [w for w, s in scores.items() if s < sim_thresh]
             if eligible:
@@ -926,6 +948,9 @@ class ProEngine:
                             "similarity_threshold": similarity_threshold,
                         },
                     )
+                duration = time.perf_counter() - start_time
+                level = logging.warning if duration > 5.0 else logging.info
+                level("respond took %.2fs", duration)
                 return response
             if extra_idx < len(ordered_vocab):
                 attempt_seeds = list(attempt_seeds) + [ordered_vocab[extra_idx]]

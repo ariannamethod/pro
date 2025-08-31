@@ -287,6 +287,7 @@ class ProEngine:
     async def setup(self) -> None:
         pro_predict._GRAPH = {}
         pro_predict._VECTORS = {}
+        pro_memory.COMPRESSION_EVENT = asyncio.Event()
         if os.path.exists(STATE_PATH):
             self.state = pro_tune.load_state(STATE_PATH)
         for key in [

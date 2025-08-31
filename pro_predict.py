@@ -29,6 +29,7 @@ _LOCK = threading.RLock()
 _SAVE_TASK: Optional[asyncio.Task] = None
 _FLUSH_TASK: Optional[asyncio.Task] = None
 _INIT_TASK: Optional[asyncio.Task] = None
+_READY = asyncio.Event()
 FLUSH_INTERVAL = float(os.getenv("SAVE_FLUSH_INTERVAL", "5"))
 
 
@@ -145,6 +146,7 @@ async def _ensure_vectors() -> None:
     with _vector_lock():
         if not _VECTORS:
             _GRAPH, _VECTORS = graph, vectors
+            _READY.set()
 
 
 def start_background_init() -> None:
@@ -186,14 +188,20 @@ async def _flush_worker() -> None:
 
 
 @timed
-async def update(word_list: List[str]) -> None:
+async def update(word_list: List[str]) -> Dict[str, Dict[str, float]]:
     """Update the co-occurrence graph and vectors with new words.
 
     The *word_list* should contain individual tokens. After the update the
     words become part of the internal vocabulary used by :func:`suggest`.
+    If embeddings are not ready yet, the words are queued and an empty
+    dictionary is returned immediately.
     """
     global _VECTORS, _SAVE_TASK, _FLUSH_TASK
-    await _ensure_vectors()
+
+    if not _READY.is_set():
+        await enqueue_tokens(word_list)
+        return {}
+
     with _vector_lock():
         words = lowercase(word_list)
         for i, word in enumerate(words):
@@ -210,6 +218,7 @@ async def update(word_list: List[str]) -> None:
         asyncio.to_thread(save_embeddings, _GRAPH, _VECTORS)
     )
     _SAVE_TASK.add_done_callback(_log_save_error)
+    return {}
 
 
 TOKENS_QUEUE: Optional[asyncio.Queue[List[str]]] = None
@@ -230,6 +239,8 @@ async def _update_worker() -> None:
             more = await TOKENS_QUEUE.get()
             batch.extend(more)
             TOKENS_QUEUE.task_done()
+        if not _READY.is_set():
+            await _READY.wait()
         await update(batch)
         batch.clear()
 
@@ -239,12 +250,6 @@ async def enqueue_tokens(tokens: List[str]) -> None:
     global TOKENS_QUEUE, _QUEUE_LOOP, _UPDATE_TASK
     if _INIT_TASK is None:
         start_background_init()
-    if not _VECTORS:
-        if _INIT_TASK is None or not _INIT_TASK.done():
-            raise RuntimeError("vector initialisation in progress")
-        _INIT_TASK.result()
-        if not _VECTORS:
-            raise RuntimeError("vector initialisation failed")
     loop = asyncio.get_running_loop()
     if TOKENS_QUEUE is None or _QUEUE_LOOP is not loop:
         TOKENS_QUEUE = asyncio.Queue()
@@ -261,17 +266,9 @@ async def suggest_async(word: str, topn: int = 3) -> List[str]:
     fuzzy string match against the vocabulary is performed.
     """
 
-    if _INIT_TASK is None:
+    if not _READY.is_set():
         start_background_init()
-    if not _VECTORS:
-        if _INIT_TASK is None or not _INIT_TASK.done():
-            return []
-        try:
-            _INIT_TASK.result()
-        except Exception:
-            return []
-        if not _VECTORS:
-            return []
+        return []
     with _vector_lock():
         if word not in _GRAPH and word not in _VECTORS:
             return []

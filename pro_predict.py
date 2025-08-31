@@ -3,6 +3,7 @@ import sqlite3
 import asyncio
 import threading
 import pickle
+import logging
 from collections import Counter, defaultdict
 from typing import Dict, List, Optional
 import math
@@ -24,6 +25,7 @@ _GRAPH: Dict[str, Counter] = {}
 _VECTORS: Dict[str, Dict[str, float]] = {}
 _SYNONYMS: Dict[str, str] = {}
 _LOCK = threading.RLock()
+_SAVE_TASK: Optional[asyncio.Task] = None
 
 
 @contextlib.contextmanager
@@ -127,13 +129,34 @@ def _ensure_vectors() -> None:
                 pass
 
 
+def _log_save_error(task: asyncio.Task) -> None:
+    try:
+        exc = task.exception()
+        if exc:
+            logging.error("Saving embeddings failed: %s", exc)
+    except asyncio.CancelledError:
+        pass
+
+
+async def wait_save_task() -> None:
+    global _SAVE_TASK
+    if _SAVE_TASK is not None:
+        try:
+            await _SAVE_TASK
+        except asyncio.CancelledError:
+            pass
+        except Exception as exc:
+            logging.error("Saving embeddings failed: %s", exc)
+        _SAVE_TASK = None
+
+
 async def update(word_list: List[str]) -> None:
     """Update the co-occurrence graph and vectors with new words.
 
     The *word_list* should contain individual tokens. After the update the
     words become part of the internal vocabulary used by :func:`suggest`.
     """
-    global _VECTORS
+    global _VECTORS, _SAVE_TASK
     with _vector_lock():
         _ensure_vectors()
         words = lowercase(word_list)
@@ -145,9 +168,11 @@ async def update(word_list: List[str]) -> None:
                 _GRAPH.setdefault(word, Counter())[other] += 1
                 _GRAPH.setdefault(other, Counter())[word] += 1
         _VECTORS = _build_embeddings(_GRAPH)
-        asyncio.create_task(
-            asyncio.to_thread(save_embeddings, _GRAPH, _VECTORS)
-        )
+    await wait_save_task()
+    _SAVE_TASK = asyncio.create_task(
+        asyncio.to_thread(save_embeddings, _GRAPH, _VECTORS)
+    )
+    _SAVE_TASK.add_done_callback(_log_save_error)
 
 
 TOKENS_QUEUE: Optional[asyncio.Queue[List[str]]] = None

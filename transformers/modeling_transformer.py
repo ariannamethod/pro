@@ -12,13 +12,14 @@ memory graph can influence the computation.
 
 from __future__ import annotations
 
-from typing import Callable, Optional, Union
+from typing import Callable, Optional, Sequence, Union
 
 import ast
 
 import numpy as np
 import morphology
 from .blocks.hyper_block import HyperBlock
+from .resonant_layers import HarmonicResonanceLayer
 
 from memory.memory_graph import GraphRetriever
 from memory.reinforce_retriever import ReinforceRetriever
@@ -103,9 +104,13 @@ class MemoryAttention:
         self,
         retriever: Union[GraphRetriever, ReinforceRetriever],
         dim: int,
+        frequencies: Sequence[float] | None = None,
     ) -> None:
         self.retriever = retriever
         self.dim = dim
+        if frequencies is None:
+            frequencies = [1.0]
+        self.resonance = HarmonicResonanceLayer(dim, np.asarray(frequencies, dtype=np.float32))
 
     def _encode(self, text: str) -> np.ndarray:
         """Encode ``text`` into a deterministic vector.
@@ -147,23 +152,27 @@ class MemoryAttention:
         self, hidden_states: np.ndarray, dialogue_id: str, speaker: str
     ) -> np.ndarray:
         """Return ``hidden_states`` enriched with memory from the graph."""
-        adapter_vec = ResonantAdapter(1.0, 0.1)(hidden_states.shape[-1])
 
         if hasattr(self.retriever, "retrieve"):
             mem_vec = self.retriever.retrieve(dialogue_id, speaker)
+            if mem_vec is not None:
+                self.resonance.modulate(mem_vec)
+            harmonic = self.resonance(hidden_states)
             if mem_vec is None:
-                return hidden_states + adapter_vec
+                return hidden_states + harmonic
             if _kernel is not None:
-                return _kernel(hidden_states, mem_vec) + adapter_vec
-            return hidden_states + mem_vec + adapter_vec
+                return _kernel(hidden_states, mem_vec) + harmonic
+            return hidden_states + mem_vec + harmonic
 
         memory = self.retriever.last_message(dialogue_id, speaker)
         if not memory:
-            return hidden_states + adapter_vec
+            return hidden_states + self.resonance(hidden_states)
         mem_vec = self._encode(memory)
+        self.resonance.modulate(mem_vec)
+        harmonic = self.resonance(hidden_states)
         if _kernel is not None:
-            return _kernel(hidden_states, mem_vec) + adapter_vec
-        return hidden_states + mem_vec + adapter_vec
+            return _kernel(hidden_states, mem_vec) + harmonic
+        return hidden_states + mem_vec + harmonic
 
 
 class QuantumHybridAttention:

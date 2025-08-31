@@ -4,6 +4,7 @@ import os
 import hashlib
 import asyncio
 import subprocess
+import shutil
 import math
 import random
 import re
@@ -310,6 +311,8 @@ class ProEngine:
             load = 0.0
         if load > 0.2:
             return False
+        if shutil.which("nvidia-smi") is None:
+            return True
         try:
             out = await asyncio.to_thread(
                 subprocess.check_output,

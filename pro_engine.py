@@ -134,6 +134,7 @@ class ProEngine:
 
     # Lightweight MoE -----------------------------------------------------
 
+    @timed(name="light_moe_decode")
     def light_moe_decode(
         self,
         x: np.ndarray,
@@ -150,6 +151,8 @@ class ProEngine:
             :meth:`select_adapters`.
         """
 
+        if self.light_moe is None:
+            return x.astype(np.float32)
         return self.light_moe(x.astype(np.float32), adapters=adapters)
 
     # Dynamic module loading --------------------------------------------
@@ -216,7 +219,7 @@ class ProEngine:
         return [tok for tok, score in zip(tokens, scores) if score >= cutoff]
 
     def _apply_layer_config(self, cfg: Dict[str, int]) -> None:
-        """Apply the selected layer configuration to the reasoner."""
+        """Apply the selected layer configuration to the reasoner and MoE."""
 
         self.layer_config = cfg
         if hasattr(self.reasoner, "configure"):
@@ -224,6 +227,16 @@ class ProEngine:
                 self.reasoner.configure(cfg)
             except Exception:
                 pass
+
+        if cfg.get("use_light_moe", 1):
+            dim = cfg.get("light_moe_dim", 16)
+            num_experts = cfg.get("light_moe_experts", 4)
+            top_k = cfg.get("light_moe_topk", 1)
+            self.light_moe = LightweightMoEBlock(
+                dim=dim, num_experts=num_experts, top_k=top_k
+            )
+        else:
+            self.light_moe = None
 
     async def setup(self) -> None:
         pro_predict._GRAPH = {}

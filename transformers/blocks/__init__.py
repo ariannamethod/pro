@@ -11,6 +11,7 @@ from .reasoning import (
     SymbolicNot,
     SymbolicReasoner,
 )
+from .hyper_block import HyperBlock
 
 __all__ = [
     "DynamicContextGate",
@@ -22,4 +23,5 @@ __all__ = [
     "SymbolicOr",
     "SymbolicNot",
     "SymbolicReasoner",
+    "HyperBlock",
 ]

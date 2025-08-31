@@ -49,6 +49,10 @@ SINGLE_PAIR_WHITELIST = {
     "i will",
 }
 
+# Prepositions and interrogatives that should not appear capitalised at the
+# end of a sentence unless fully upper-case
+FINAL_TOKEN_PREPOSITIONS = {"of", "from", "where", "when"}
+
 # High entropy patterns ---------------------------------------------------
 SENTENCE_END_PREP_RE = re.compile(
     r"\b(to|by|at|of|in|on)[.!?](?:\s|$)", re.IGNORECASE
@@ -83,6 +87,12 @@ def passes_filters(text: str) -> bool:
         if pair in SINGLE_PAIR_WHITELIST:
             continue
         return False
+    last_word_match = re.search(r"\b(\w+)\W*$", text)
+    if last_word_match:
+        last_word = last_word_match.group(1)
+        if last_word.lower() in FINAL_TOKEN_PREPOSITIONS:
+            if last_word != last_word.lower() and not last_word.isupper():
+                return False
     if SENTENCE_END_PREP_RE.search(text):
         _log(
             "ending-preposition",

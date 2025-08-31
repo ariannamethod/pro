@@ -3,8 +3,6 @@ import logging
 import os
 import hashlib
 import asyncio
-import subprocess
-import shutil
 import math
 import random
 import re
@@ -56,6 +54,15 @@ FORBIDDEN_ENDINGS = {"the", "a", "and", "or", "his", "my", "their"}
 
 # Common template phrases that should be discouraged in responses.
 COMMON_TEMPLATES = {"V2.0"}
+
+
+def _read_cpu_times() -> Tuple[int, int]:
+    with open("/proc/stat", "r") as f:
+        parts = f.readline().split()
+    values = [int(p) for p in parts[1:]]
+    idle = values[3] + values[4] if len(values) > 4 else values[3]
+    total = sum(values)
+    return idle, total
 
 
 def filter_similar_candidates(
@@ -391,29 +398,17 @@ class ProEngine:
 
     async def _system_idle(self) -> bool:
         try:
-            load = os.getloadavg()[0] / max(1, os.cpu_count() or 1)
-        except OSError:
-            load = 0.0
-        if load > 0.2:
-            return False
-        if shutil.which("nvidia-smi") is None:
-            return True
-        try:
-            out = await asyncio.to_thread(
-                subprocess.check_output,
-                [
-                    "nvidia-smi",
-                    "--query-gpu=utilization.gpu",
-                    "--format=csv,noheader,nounits",
-                ],
-                stderr=subprocess.DEVNULL,
-            )
-            util = int(out.decode().splitlines()[0])
-            if util > 10:
-                return False
+            idle1, total1 = await asyncio.to_thread(_read_cpu_times)
+            await asyncio.sleep(0.1)
+            idle2, total2 = await asyncio.to_thread(_read_cpu_times)
+            idle_delta = idle2 - idle1
+            total_delta = total2 - total1
+            if total_delta <= 0:
+                return True
+            usage = 1 - idle_delta / total_delta
+            return usage < 0.2
         except Exception:
-            pass
-        return True
+            return True
 
     async def _dream_worker(self) -> None:
         try:

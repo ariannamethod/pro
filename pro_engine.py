@@ -47,7 +47,6 @@ HASH_PATH = 'dataset_sha.json'
 LOG_PATH = 'pro.log'
 TUNE_CONCURRENCY = 4
 SCAN_CONCURRENCY = 4
-COMPRESSION_INTERVAL = 100
 
 # Maximum time a single dream run is allowed to execute before being
 # cancelled. This prevents runaway background tasks from piling up.
@@ -367,8 +366,10 @@ class ProEngine:
         async def _compression_worker() -> None:
             try:
                 while True:
+                    await pro_memory.COMPRESSION_EVENT.wait()
+                    pro_memory.COMPRESSION_EVENT.clear()
                     count = await pro_memory.total_adapter_usage()
-                    if count >= COMPRESSION_INTERVAL:
+                    if count >= pro_memory.COMPRESSION_INTERVAL:
                         try:
                             mut = LayerMutator(use_lora=True)
                             mut.load('adapter_pool')
@@ -376,7 +377,6 @@ class ProEngine:
                         except Exception as exc:  # pragma: no cover - logging side effect
                             logging.error("Compression failed: %s", exc)
                         await pro_memory.reset_adapter_usage()
-                    await asyncio.sleep(0.1)
             except asyncio.CancelledError:
                 raise
 

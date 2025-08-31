@@ -28,6 +28,7 @@ _SYNONYMS: Dict[str, str] = {}
 _LOCK = threading.RLock()
 _SAVE_TASK: Optional[asyncio.Task] = None
 _FLUSH_TASK: Optional[asyncio.Task] = None
+_INIT_TASK: Optional[asyncio.Task] = None
 FLUSH_INTERVAL = float(os.getenv("SAVE_FLUSH_INTERVAL", "5"))
 
 
@@ -146,6 +147,17 @@ async def _ensure_vectors() -> None:
             _GRAPH, _VECTORS = graph, vectors
 
 
+def start_background_init() -> None:
+    """Kick off vector initialisation in the background."""
+    global _INIT_TASK
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        loop = asyncio.get_event_loop()
+    if _INIT_TASK is None or _INIT_TASK.done():
+        _INIT_TASK = loop.create_task(_ensure_vectors())
+
+
 def _log_save_error(task: asyncio.Task) -> None:
     try:
         exc = task.exception()
@@ -225,6 +237,14 @@ async def _update_worker() -> None:
 async def enqueue_tokens(tokens: List[str]) -> None:
     """Add *tokens* to the update queue and ensure the worker runs."""
     global TOKENS_QUEUE, _QUEUE_LOOP, _UPDATE_TASK
+    if _INIT_TASK is None:
+        start_background_init()
+    if not _VECTORS:
+        if _INIT_TASK is None or not _INIT_TASK.done():
+            raise RuntimeError("vector initialisation in progress")
+        _INIT_TASK.result()
+        if not _VECTORS:
+            raise RuntimeError("vector initialisation failed")
     loop = asyncio.get_running_loop()
     if TOKENS_QUEUE is None or _QUEUE_LOOP is not loop:
         TOKENS_QUEUE = asyncio.Queue()
@@ -241,7 +261,17 @@ async def suggest_async(word: str, topn: int = 3) -> List[str]:
     fuzzy string match against the vocabulary is performed.
     """
 
-    await _ensure_vectors()
+    if _INIT_TASK is None:
+        start_background_init()
+    if not _VECTORS:
+        if _INIT_TASK is None or not _INIT_TASK.done():
+            return []
+        try:
+            _INIT_TASK.result()
+        except Exception:
+            return []
+        if not _VECTORS:
+            return []
     with _vector_lock():
         if word not in _GRAPH and word not in _VECTORS:
             return []

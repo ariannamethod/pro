@@ -173,10 +173,9 @@ Knowledge updates happen while users wait.
 
 Pairs distant steps to catch temporal symmetry. Forward and backward views meet. This choice facilitates ongoing refinement.
 
-### DeepSeek Transformers
+### DeepSeek-Inspired MoE
 
-Upcoming models extend context windows through sparse kernels. They compress attention so long chats stay fluid. This choice facilitates ongoing refinement.
-Early experiments monitor performance under tight resources.
+We borrow ideas from DeepSeek's mixture-of-experts design to extend context windows with sparse kernels. This keeps long chats fluid while conserving compute. Early experiments monitor performance under tight resources.
 
 ### Quantum Memory
 
@@ -243,10 +242,6 @@ Helper tools mutate layers and manage LoRA adapters with minimal code. They auto
 ### Vector Store API
 
 Unified endpoints accept embeddings and return nearby vectors. External clients read and write similarities without touching the database.
-
-### Upcoming DeepSeek Integration
-
-Planned hooks will connect to DeepSeek models for extended context windows. Sparse kernels promise longer chats while conserving compute.
 
 ### Quantum Attention Backend
 

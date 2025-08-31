@@ -71,7 +71,7 @@ async def retrieve(
 ) -> List[str]:
     """Retrieve context using graph links and embedding similarity."""
 
-    await asyncio.to_thread(pro_predict._ensure_vectors)
+    await pro_predict._ensure_vectors()
     qwords = lowercase(query_words)
     qvec = _sentence_vector(qwords)
     scored: List[tuple[float, str]] = []

@@ -38,7 +38,7 @@ def simulate_paths(seeds: List[str], depth: int = 2) -> ForecastNode:
         Root node representing *seeds* with nested children branches.
     """
 
-    pro_predict._ensure_vectors()
+    asyncio.run(pro_predict._ensure_vectors())
     vocab = list(pro_predict._VECTORS.keys())
 
     def _expand(tokens: List[str], remaining: int, prob: float) -> ForecastNode:
@@ -68,7 +68,7 @@ def backpropagate_forecast(node: ForecastNode) -> None:
     prediction (i.e. ``len(tokens) > 1``).
     """
 
-    pro_predict._ensure_vectors()
+    asyncio.run(pro_predict._ensure_vectors())
     vocab = list(pro_predict._VECTORS.keys())
     model_key = tuple(vocab)
     if model_key not in pro_predict._TRANSFORMERS:

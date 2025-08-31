@@ -12,7 +12,10 @@ def test_forecast_retrocausality(monkeypatch):
     monkeypatch.setattr(pro_predict, "_VECTORS", {w: {} for w in vocab}, raising=False)
     monkeypatch.setattr(pro_predict, "_GRAPH", {w: {} for w in vocab}, raising=False)
     monkeypatch.setattr(pro_predict, "_TRANSFORMERS", {}, raising=False)
-    monkeypatch.setattr(pro_predict, "_ensure_vectors", lambda: None, raising=False)
+    async def _noop():
+        return None
+
+    monkeypatch.setattr(pro_predict, "_ensure_vectors", _noop, raising=False)
 
     root = pro_forecast.simulate_paths(["alpha"], depth=1)
     low_branch = min(root.children, key=lambda n: n.prob)

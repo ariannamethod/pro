@@ -12,10 +12,7 @@ except ModuleNotFoundError:  # pragma: no cover - handled in tests
     torch = None
     nn = object  # type: ignore[misc,assignment]
 
-try:  # pragma: no cover - optional dependency
-    from attention.complex_attention import ComplexAttention
-except Exception:  # pragma: no cover - module requires torch
-    ComplexAttention = None
+from attention import ComplexAttention
 
 
 @dataclass
@@ -51,7 +48,7 @@ class TransformerBlock(nn.Module if torch else object):  # type: ignore[misc]
     """Very small transformer block wrapper."""
 
     def __init__(self, config: TransformerBlockConfig) -> None:  # pragma: no cover - simple wiring
-        if torch is None or ComplexAttention is None:
+        if torch is None:
             raise ModuleNotFoundError("torch is required for TransformerBlock")
         super().__init__()
         self.config = config

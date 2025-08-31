@@ -66,3 +66,35 @@ def test_meta_controller_triggers_tuning(monkeypatch):
         asyncio.run(mc.update({"perplexity": 10.0}))
 
     assert engine.dataset_queue.get_nowait() is None
+
+
+def test_shutdown_cancels_tasks(monkeypatch):
+    engine = pro_engine.ProEngine()
+
+    async def fake_scan() -> None:
+        engine._start_tune_worker()
+
+    monkeypatch.setattr(engine, "scan_datasets", fake_scan)
+    monkeypatch.setattr(pro_memory, "init_db", lambda: asyncio.sleep(0))
+    monkeypatch.setattr(pro_memory, "build_index", lambda: asyncio.sleep(0))
+    monkeypatch.setattr(pro_memory, "total_adapter_usage", lambda: asyncio.sleep(0, result=0))
+    monkeypatch.setattr(pro_tune, "train", lambda state, path: None)
+    async def fake_awatch(path):
+        while True:
+            await asyncio.sleep(0.1)
+            yield set()
+    monkeypatch.setattr(pro_engine, "awatch", fake_awatch)
+    monkeypatch.setattr(engine, "_start_dream_worker", lambda: None)
+
+    async def run() -> None:
+        await engine.setup()
+        await engine.shutdown()
+
+    asyncio.run(run())
+
+    tasks = [
+        engine._watcher_task,
+        engine._compression_task,
+        engine._tune_worker_task,
+    ]
+    assert all(t is not None and t.cancelled() for t in tasks)

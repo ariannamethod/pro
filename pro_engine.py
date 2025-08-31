@@ -8,6 +8,7 @@ import random
 import re
 import importlib.util
 import sys
+import time
 from typing import Dict, List, Tuple, Set, Optional
 from collections import Counter, deque
 
@@ -924,14 +925,26 @@ class ProEngine:
         adapters = [w for _, w in adapter_pairs]
         words = swap_pronouns(words)
         user_forbidden = set(words)
-        msg_emb = await pro_rag_embedding.embed_sentence(message)
+        async def _time(name: str, coro):
+            start = time.perf_counter()
+            try:
+                return await coro
+            finally:
+                logging.info("%s took %.2fs", name, time.perf_counter() - start)
+
+        msg_emb_task = asyncio.create_task(
+            _time("embed_sentence", pro_rag_embedding.embed_sentence(message))
+        )
         unknown: List[str] = [
             w for w in words if w not in self.state['word_counts']
         ]
+        suggest_tasks = [
+            asyncio.to_thread(pro_predict.suggest, w) for w in unknown
+        ]
         predicted: List[str] = []
-        for w in unknown:
-            suggestions = await asyncio.to_thread(pro_predict.suggest, w)
-            predicted.extend(suggestions)
+        if suggest_tasks:
+            for suggestions in await asyncio.gather(*suggest_tasks):
+                predicted.extend(suggestions)
         # Blend n-gram prediction with transformer logits
         ngram_pred = ""
         if words:
@@ -952,33 +965,44 @@ class ProEngine:
         if trans_pred and trans_pred != ngram_pred:
             blend.append(trans_pred)
         predicted.extend(blend)
-        memory_context: List[str] = []
-        try:
-            memory_context = await pro_memory.fetch_similar_messages(
-                message, top_k=5
-            )
+        mem_fetch = _time(
+            "memory_fetch", pro_memory.fetch_similar_messages(message, top_k=5)
+        )
+        mem_encode = _time("memory_encode", pro_memory.encode_message(message))
+        rag_retrieve = _time("rag_retrieve", pro_rag.retrieve(words))
+        msg_emb, memory_context, mem_emb, context = await asyncio.gather(
+            msg_emb_task, mem_fetch, mem_encode, rag_retrieve, return_exceptions=True
+        )
+        if isinstance(memory_context, Exception):
+            logging.error("Memory retrieval failed: %s", memory_context)
+            memory_context = []
+        if isinstance(mem_emb, Exception):
+            logging.error("Encoding message failed: %s", mem_emb)
+            mem_emb = None
+        if isinstance(context, Exception):
+            logging.error("Context retrieval failed: %s", context)
+            context = []
+        ext_hits: List[str] = []
+        if mem_emb is not None:
             try:
-                emb = await pro_memory.encode_message(message)
-                ext_hits = await vector_store.query(emb.tolist(), top_k=5)
-                memory_context.extend(ext_hits)
+                ext_hits = await _time(
+                    "vector_query", vector_store.query(mem_emb.tolist(), top_k=5)
+                )
             except Exception as exc:  # pragma: no cover - logging side effect
                 logging.error("External store query failed: %s", exc)
-        except Exception as exc:  # pragma: no cover - logging side effect
-            logging.error("Memory retrieval failed: %s", exc)
-        try:
-            await pro_memory.add_message(message)
-            try:
-                emb = await pro_memory.encode_message(message)
-                await vector_store.upsert(message, emb.tolist())
-            except Exception as exc:  # pragma: no cover - logging side effect
-                logging.error("External store upsert failed: %s", exc)
-        except Exception as exc:  # pragma: no cover - logging side effect
-            logging.error("Storing message failed: %s", exc)
-        context: List[str] = []
-        try:
-            context = await pro_rag.retrieve(words)
-        except Exception as exc:  # pragma: no cover - logging side effect
-            logging.error("Context retrieval failed: %s", exc)
+        memory_context.extend(ext_hits)
+        store_tasks = []
+        store_tasks.append(_time("memory_add", pro_memory.add_message(message)))
+        if mem_emb is not None:
+            store_tasks.append(
+                _time(
+                    "vector_upsert", vector_store.upsert(message, mem_emb.tolist())
+                )
+            )
+        store_results = await asyncio.gather(*store_tasks, return_exceptions=True)
+        for res in store_results:
+            if isinstance(res, Exception):
+                logging.error("Storing message failed: %s", res)
         context = memory_context + context
         try:
             if re.search(r"\b(AND|OR|NOT)\b", message):

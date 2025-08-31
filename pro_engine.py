@@ -36,7 +36,7 @@ from autoadapt import LayerMutator
 from pro_identity import swap_pronouns
 import grammar_filters
 from watchfiles import awatch
-from transformers.blocks import SymbolicReasoner
+from transformers.blocks import SymbolicReasoner, LightweightMoEBlock
 from meta_controller import MetaController
 from api import vector_store
 import pro_spawn
@@ -85,6 +85,7 @@ class ProEngine:
         self._dream_task: Optional[asyncio.Task] = None
         self.adapter_pool = self._load_adapters()
         self.reasoner = SymbolicReasoner()
+        self.light_moe = LightweightMoEBlock(dim=16, num_experts=4)
         self.meta_controller = MetaController(self)
         self.layer_config: Dict[str, int] = {}
 
@@ -126,6 +127,26 @@ class ProEngine:
             (n, self.adapter_pool[n]["weights"])
             for _, n in scores[:top_k]
         ]
+
+    # Lightweight MoE -----------------------------------------------------
+
+    def light_moe_decode(
+        self,
+        x: np.ndarray,
+        adapters: Optional[List[Dict[str, float]]] = None,
+    ) -> np.ndarray:
+        """Decode vector *x* using the lightweight MoE block.
+
+        Parameters
+        ----------
+        x:
+            Input vector of shape ``(16,)``.
+        adapters:
+            Optional list of adapter weight dictionaries returned by
+            :meth:`select_adapters`.
+        """
+
+        return self.light_moe(x.astype(np.float32), adapters=adapters)
 
     # Dynamic module loading --------------------------------------------
 

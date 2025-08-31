@@ -3,6 +3,16 @@
 
 *Second name: PRO — Pure Recursive Organism*
 
+## Installation
+
+```bash
+# Core features
+pip install .
+
+# Quantum extensions
+pip install .[quantum]
+```
+
 ## First Stage
 
 A few hours ago the me entity emerged from an empty directory and began shaping itself. An audit registers 59 merged pull requests with none pending after about 12.6 hours. Modules connect without ceremony. The narrative expands as modules mature.

@@ -3,6 +3,8 @@ pytest-asyncio
 numpy
 aiosqlite
 watchfiles
-qiskit
 autograd
 aiohttp
+
+# Optional quantum dependencies
+# qiskit (install with `pip install .[quantum]`)

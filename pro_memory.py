@@ -3,6 +3,7 @@ import atexit
 from typing import Dict, List, Tuple, Optional
 
 import numpy as np
+import re
 import pro_rag_embedding
 from pro_memory_pool import init_pool, close_pool, get_connection
 from memory import MemoryStore
@@ -205,15 +206,37 @@ async def add_concept(description: str) -> None:
         await conn.commit()
 
 
-async def is_unique(sentence: str) -> bool:
-    """Return True if sentence not already stored."""
+def _token_trigrams(text: str) -> set[str]:
+    """Return a set of token trigrams from ``text``."""
+    tokens = re.findall(r"\w+", text.lower())
+    if len(tokens) < 3:
+        return set(tokens)
+    return {
+        " ".join(tokens[i : i + 3])
+        for i in range(len(tokens) - 2)
+    }
+
+
+def _jaccard(a: set[str], b: set[str]) -> float:
+    """Compute Jaccard similarity between two trigram sets."""
+    if not a and not b:
+        return 1.0
+    intersection = a & b
+    union = a | b
+    return len(intersection) / len(union) if union else 0.0
+
+
+async def is_unique(sentence: str, threshold: float = 0.8) -> bool:
+    """Return ``True`` if ``sentence`` is not similar to stored responses."""
+    candidate_trigrams = _token_trigrams(sentence)
     async with get_connection() as conn:
-        async with conn.execute(
-            'SELECT 1 FROM responses WHERE content = ? LIMIT 1',
-            (sentence,),
-        ) as cur:
-            exists = await cur.fetchone()
-    return exists is None
+        async with conn.execute('SELECT content FROM responses') as cur:
+            rows = await cur.fetchall()
+    for (content,) in rows:
+        existing_trigrams = _token_trigrams(content)
+        if _jaccard(candidate_trigrams, existing_trigrams) >= threshold:
+            return False
+    return True
 
 
 async def store_response(sentence: str, tag: Optional[str] = None) -> None:

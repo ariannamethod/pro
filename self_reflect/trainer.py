@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 
 class WeaknessDetector:
@@ -21,32 +21,42 @@ class WeaknessDetector:
         return weaknesses
 
 
-class DataGenerator:
-    """Generate synthetic training data addressing weaknesses."""
+class MetaOptimizer:
+    """Suggest parameter updates based on detected weaknesses."""
 
-    def generate(self, weaknesses: List[str]) -> List[str]:
-        """Create simple prompts that encourage better behaviour."""
-        data: List[str] = []
-        for weakness in weaknesses:
-            data.append(f"Example conversation improving: {weakness}")
-        return data
+    def optimize(
+        self, weaknesses: List[str], params: Dict[str, float]
+    ) -> Dict[str, float]:
+        """Return a mapping of parameter names to update deltas.
+
+        The strategy is intentionally simple: if any weaknesses are
+        detected, each parameter receives an additive boost proportional to
+        the number of weaknesses. A production implementation could employ
+        gradient-based optimisation or reinforcement learning.
+        """
+        deltas: Dict[str, float] = {}
+        if not weaknesses:
+            return deltas
+        strength = 0.1 * len(weaknesses)
+        for name in params:
+            deltas[name] = strength
+        return deltas
 
 
 class SelfFineTuner:
-    """Orchestrate self-reflection and fine-tuning cycle."""
+    """Orchestrate self-reflection and meta-optimisation cycle."""
 
     def __init__(self, model: Optional[object] = None) -> None:
         self.model = model
 
-    def run(self, conversations: List[str]) -> List[str]:
-        """Perform one cycle of detection, data generation and fine-tuning.
+    def run(self, conversations: List[str], params: Dict[str, float]) -> Dict[str, float]:
+        """Detect weaknesses and propose parameter updates.
 
-        Returns the list of weaknesses that were targeted.
+        Returns a dictionary of parameter deltas suggested by the
+        :class:`MetaOptimizer`.
         """
         detector = WeaknessDetector()
         weaknesses = detector.detect(conversations)
-        generator = DataGenerator()
-        training_data = generator.generate(weaknesses)
-        # Placeholder: integrate with actual fine-tuning pipeline.
-        _ = training_data
-        return weaknesses
+        optimizer = MetaOptimizer()
+        deltas = optimizer.optimize(weaknesses, params)
+        return deltas

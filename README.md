@@ -155,7 +155,7 @@ Adapters stay compact for easy sharing.
 ### Punctuation Rule Engine
 
 Finite rules keep possessive endings consistent. This engine prevents awkward phrasing. Such design smooths future scaling.
-Grammar rules integrate with morphology checks.
+Grammar rules integrate with morphology checks. Final prepositions like "of" or "when" stay lowercase unless fully uppercased.
 
 ### External RAG Storage Interface
 
@@ -170,6 +170,11 @@ Knowledge updates happen while users wait.
 ### Time Fold Transformer
 
 Pairs distant steps to catch temporal symmetry. Forward and backward views meet. This choice facilitates ongoing refinement.
+
+### DeepSeek Transformers
+
+Upcoming models extend context windows through sparse kernels. They compress attention so long chats stay fluid. This choice facilitates ongoing refinement.
+Early experiments monitor performance under tight resources.
 
 ### Quantum Memory
 
@@ -202,10 +207,12 @@ Permutation matrices shift perspectives in dialogue. Identity updates keep voice
 ### Self Reflection Engine
 
 Compares output to references and adjusts models. Discrepancies shrink over time. This choice facilitates ongoing refinement.
+Reflections guide gradual corrections.
 
-### Patch Routing Policy
+### Router Policy
 
-Selects quantum or classical paths from patch features. Decisions refine bandwidth use. This router keeps computations balanced. Such design smooths future scaling.
+Selects quantum or classical paths from patch features. Decisions refine bandwidth use. This router keeps computations balanced.
+Such design smooths future scaling.
 
 ### Peer-to-Peer Resonance
 
@@ -214,6 +221,11 @@ Shares gradient hashes between nodes without central servers. Exchanges apply up
 ### Chat Memory API
 
 Minimal endpoint storing dialogue turns in a memory graph. Calls return vectors enriched by attention layers. The API simplifies integration. It also streamlines future extensions.
+
+### Vector Store API
+
+Unified endpoint accepts embeddings and returns nearby vectors. Clients submit fragments and fetch matches without touching the database. This choice facilitates ongoing refinement.
+The API keeps external tools in sync.
 
 ### Smalltalk Technology
 

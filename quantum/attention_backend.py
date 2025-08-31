@@ -1,12 +1,24 @@
+"""Backends and factory for quantum-style attention mechanisms."""
+
 from __future__ import annotations
 
-"""Simple Qiskit-based backend to simulate attention on NISQ devices."""
+from typing import Protocol, runtime_checkable
 
 import numpy as np
 try:  # pragma: no cover - optional import for docs
     from qiskit import Aer, QuantumCircuit, execute
 except Exception:  # pragma: no cover - allow tests without qiskit
     Aer = QuantumCircuit = execute = None  # type: ignore
+
+
+@runtime_checkable
+class AttentionBackend(Protocol):
+    """Minimal protocol for attention backends."""
+
+    def attention(
+        self, query: np.ndarray, key: np.ndarray, value: np.ndarray
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """Return attention output and optional Betti features."""
 
 
 class QuantumAttentionBackend:
@@ -39,9 +51,35 @@ class QuantumAttentionBackend:
         counts = job.result().get_counts()
         return counts.get("1", 0) / self.shots
 
-    def attention(self, query: np.ndarray, key: np.ndarray, value: np.ndarray) -> np.ndarray:
+    def attention(
+        self, query: np.ndarray, key: np.ndarray, value: np.ndarray
+    ) -> tuple[np.ndarray, np.ndarray]:
         """Return attention output for ``query``/``key``/``value`` triples."""
         scores = np.dot(query, key.T) / np.sqrt(key.shape[-1])
         probs = np.array([self._prob(s) for s in scores])
         probs = probs / probs.sum() if probs.sum() else probs
-        return probs @ value
+        out = probs @ value
+        betti = np.zeros(2, dtype=np.int64)
+        return out, betti
+
+
+def create_attention_backend(name: str, **kwargs) -> AttentionBackend:
+    """Return an attention backend by *name*.
+
+    Parameters
+    ----------
+    name:
+        Backend identifier. ``"qiskit"`` uses :class:`QuantumAttentionBackend`
+        while ``"classical"`` uses the pure NumPy implementation
+        :class:`~transformers.quantum_attention.QuantumAttention`.
+    kwargs:
+        Passed through to the backend constructor.
+    """
+
+    if name == "qiskit":
+        return QuantumAttentionBackend(**kwargs)
+    if name == "classical":
+        from transformers.quantum_attention import QuantumAttention
+
+        return QuantumAttention(**kwargs)
+    raise ValueError(f"Unknown attention backend: {name}")

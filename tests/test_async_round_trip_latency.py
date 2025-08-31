@@ -24,8 +24,8 @@ async def test_round_trip_latency_benchmark():
     await pro_memory.init_db()
 
     db_latencies = []
-    heavy_text = "benchmark data " * 50
-    for i in range(20):
+    heavy_text = "benchmark data " * 50  # ~1000 chars simulates realistic payload
+    for i in range(20):  # emulate 20 message exchanges
         start = time.perf_counter()
         msg = f"{heavy_text}{i}"
         await pro_memory.add_message(msg)
@@ -55,8 +55,8 @@ async def test_round_trip_latency_benchmark():
         len(all_latencies),
     )
 
-    assert avg_latency < 10, (
-        f"Average latency {avg_latency:.2f}s exceeds 10 seconds"
+    assert avg_latency < 5, (
+        f"Average latency {avg_latency:.2f}s exceeds 5 seconds"
     )
 
     await pro_memory.close_db()

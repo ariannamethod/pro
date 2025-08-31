@@ -30,6 +30,30 @@ from .quantum_memory_attention import QuantumMemoryAttention
 _kernel: Optional[Callable[[np.ndarray, np.ndarray], np.ndarray]] = None
 
 
+def _phase_magnitude_add(*vecs: np.ndarray) -> np.ndarray:
+    """Combine vectors preserving phase information.
+
+    If none of the inputs are complex, this reduces to ordinary summation.
+    Otherwise magnitudes and phases are summed separately and converted back
+    into a complex vector.
+    """
+
+    if not any(np.iscomplexobj(v) for v in vecs):
+        total = vecs[0]
+        for v in vecs[1:]:
+            total = total + v
+        return total
+    mags = sum(np.abs(v) for v in vecs)
+    phase = None
+    for v in vecs:
+        if np.iscomplexobj(v) and np.any(v):
+            phase = np.angle(v)
+            break
+    if phase is None:
+        phase = 0.0
+    return mags * np.exp(1j * phase)
+
+
 def register_kernel(fragment: Optional[str]) -> None:
     """Register a custom kernel fragment.
 
@@ -159,20 +183,20 @@ class MemoryAttention:
                 self.resonance.modulate(mem_vec)
             harmonic = self.resonance(hidden_states)
             if mem_vec is None:
-                return hidden_states + harmonic
+                return _phase_magnitude_add(hidden_states, harmonic)
             if _kernel is not None:
-                return _kernel(hidden_states, mem_vec) + harmonic
-            return hidden_states + mem_vec + harmonic
+                return _phase_magnitude_add(_kernel(hidden_states, mem_vec), harmonic)
+            return _phase_magnitude_add(hidden_states, mem_vec, harmonic)
 
         memory = self.retriever.last_message(dialogue_id, speaker)
         if not memory:
-            return hidden_states + self.resonance(hidden_states)
+            return _phase_magnitude_add(hidden_states, self.resonance(hidden_states))
         mem_vec = self._encode(memory)
         self.resonance.modulate(mem_vec)
         harmonic = self.resonance(hidden_states)
         if _kernel is not None:
-            return _kernel(hidden_states, mem_vec) + harmonic
-        return hidden_states + mem_vec + harmonic
+            return _phase_magnitude_add(_kernel(hidden_states, mem_vec), harmonic)
+        return _phase_magnitude_add(hidden_states, mem_vec, harmonic)
 
 
 class QuantumHybridAttention:
@@ -186,9 +210,11 @@ class QuantumHybridAttention:
         self, query: np.ndarray, key: np.ndarray, value: np.ndarray
     ) -> tuple[np.ndarray, np.ndarray]:
         scores = np.dot(query, key.T) / np.sqrt(key.shape[-1])
-        weights = np.exp(scores)
+        magnitudes = np.abs(scores)
+        phases = np.exp(1j * np.angle(scores))
+        weights = np.exp(magnitudes)
         weights /= weights.sum(axis=-1, keepdims=True)
-        out = weights @ value
+        out = (weights * phases) @ value
         betti = np.zeros((query.shape[0], 2), dtype=np.int64)
         return out, betti
 

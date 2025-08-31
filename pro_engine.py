@@ -100,6 +100,8 @@ class ProEngine:
         self.light_moe = LightweightMoEBlock(dim=16, num_experts=4)
         self.meta_controller = MetaController(self)
         self.layer_config: Dict[str, int] = {}
+        # Cache of tokens for each dataset
+        self._dataset_tokens: Dict[str, List[str]] = {}
 
     def _load_adapters(self) -> Dict[str, Dict]:
         pool: Dict[str, Dict] = {}
@@ -505,6 +507,27 @@ class ProEngine:
             changed_files = [os.path.join('datasets', n) for n in dataset_names]
         with open(HASH_PATH, 'w', encoding='utf-8') as fh:
             json.dump(new_hashes, fh)
+        for name in removed:
+            if name != '__weights__':
+                self._dataset_tokens.pop(name, None)
+        if changed_files:
+            async def load_tokens(path: str) -> Tuple[str, List[str]]:
+                def _read() -> List[str]:
+                    tokens: List[str] = []
+                    try:
+                        with open(path, 'r', encoding='utf-8', errors='ignore') as fh:
+                            for line in fh:
+                                tokens.extend(lowercase(tokenize(line)))
+                    except Exception:
+                        pass
+                    return tokens
+                return os.path.basename(path), await asyncio.to_thread(_read)
+
+            results = await asyncio.gather(
+                *(load_tokens(p) for p in changed_files)
+            )
+            for name, tokens in results:
+                self._dataset_tokens[name] = tokens
         for path in changed_files:
             await self.dataset_queue.put(path)
 
@@ -1160,27 +1183,16 @@ class ProEngine:
                 tokens.extend(lowercase(tokenize(text)))
             return tokens
 
-        def _load_data_tokens() -> List[str]:
+        def _cached_data_tokens() -> List[str]:
             tokens: List[str] = []
-            if os.path.exists("datasets"):
-                for name in os.listdir("datasets"):
-                    path = os.path.join("datasets", name)
-                    if not os.path.isfile(path):
-                        continue
-                    try:
-                        with open(
-                            path, "r", encoding="utf-8", errors="ignore"
-                        ) as fh:
-                            for line in fh:
-                                tokens.extend(lowercase(tokenize(line)))
-                    except Exception:  # pragma: no cover - safety
-                        continue
+            for t in self._dataset_tokens.values():
+                tokens.extend(t)
             return tokens
 
         mem_tokens_task = asyncio.to_thread(
             _gather_tokens, recent_msgs + recent_resps
         )
-        data_tokens_task = asyncio.to_thread(_load_data_tokens)
+        data_tokens_task = asyncio.to_thread(_cached_data_tokens)
         mem_tokens, data_tokens = await asyncio.gather(
             mem_tokens_task, data_tokens_task
         )
@@ -1243,6 +1255,11 @@ class ProEngine:
             os.makedirs('datasets', exist_ok=True)
             with open(dataset_path, 'a', encoding='utf-8') as fh:
                 fh.write(f"{message}\n{response}\n")
+            tokens = self._dataset_tokens.setdefault(
+                os.path.basename(dataset_path), []
+            )
+            tokens.extend(words)
+            tokens.extend(lowercase(tokenize(response)))
             try:
                 with open(dataset_path, 'rb') as fh:
                     digest = hashlib.sha256(fh.read()).hexdigest()

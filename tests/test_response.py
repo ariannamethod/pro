@@ -332,6 +332,11 @@ def test_respond_latency(tmp_path, monkeypatch):
         return None
 
     monkeypatch.setattr(pro_predict, "_ensure_vectors", _noop)
+
+    async def _suggest_noop(*a, **k):
+        return []
+
+    monkeypatch.setattr(pro_predict, "suggest_async", _suggest_noop)
     monkeypatch.setattr(pro_predict, "suggest", lambda *a, **k: [])
     real_exists = os.path.exists
     monkeypatch.setattr(

@@ -315,3 +315,37 @@ def test_response_variable_length_output(tmp_path, monkeypatch):
         set(w.lower() for w in f2_second)
     )
     assert target1 != target2
+
+
+def test_respond_latency(tmp_path, monkeypatch):
+    db_path = tmp_path / "mem.db"
+    monkeypatch.setattr(pro_memory, "DB_PATH", str(db_path))
+    asyncio.run(pro_memory.init_db())
+    engine = pro_engine.ProEngine()
+    engine.state["trigram_counts"] = {}
+    engine.state["bigram_counts"] = {}
+    engine.state["word_counts"] = {}
+    engine.state["char_ngram_counts"] = {}
+    monkeypatch.setattr(pro_predict, "_VECTORS", {})
+
+    async def _noop():
+        return None
+
+    monkeypatch.setattr(pro_predict, "_ensure_vectors", _noop)
+    monkeypatch.setattr(pro_predict, "suggest", lambda *a, **k: [])
+    real_exists = os.path.exists
+    monkeypatch.setattr(
+        os.path,
+        "exists",
+        lambda p, _real=real_exists: False if p == "datasets" else _real(p),
+    )
+
+    async def _run() -> float:
+        loop = asyncio.get_event_loop()
+        start = loop.time()
+        await engine.respond(["hello", "world"])
+        end = loop.time()
+        return end - start
+
+    latency = asyncio.run(_run())
+    assert latency < 1.0

@@ -18,6 +18,7 @@ import ast
 
 import numpy as np
 import morphology
+from .blocks.hyper_block import HyperBlock
 
 from memory.memory_graph import GraphRetriever
 from memory.reinforce_retriever import ReinforceRetriever
@@ -230,3 +231,25 @@ class QuantumMemoryLayer:
         return self.attention.attention(
             query, key, value, dialogue_id, speaker
         )
+
+
+class StaticBlock:
+    """Linear block with fixed weights."""
+
+    def __init__(self, weights: np.ndarray) -> None:
+        self.weights = weights
+
+    def __call__(
+        self, x: np.ndarray, context: np.ndarray | None = None
+    ) -> np.ndarray:
+        return self.weights @ x
+
+
+def block_factory(
+    in_dim: int, out_dim: int, use_hyper: bool = False
+) -> StaticBlock | HyperBlock:
+    """Return a static or hyper block based on *use_hyper* flag."""
+    if use_hyper:
+        return HyperBlock(in_dim, out_dim)
+    weights = np.eye(out_dim, in_dim, dtype=np.float32)
+    return StaticBlock(weights)

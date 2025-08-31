@@ -83,11 +83,12 @@ def passes_filters(text: str) -> bool:
         if pair in SINGLE_PAIR_WHITELIST:
             continue
         return False
-    if SENTENCE_END_PREP_RE.search(text):
-        _log(
-            "ending-preposition",
-            SENTENCE_END_PREP_RE.search(text).group(0).split(),
-        )
+    m = SENTENCE_END_PREP_RE.search(text)
+    if m:
+        token = m.group(0).rstrip(".!?")
+        if not (token.islower() or token.isupper()):
+            return False
+        _log("ending-preposition", m.group(0).split())
     if TO_SEQ_RE.search(text):
         _log("to-sequence", TO_SEQ_RE.search(text).group(0).split())
     return True

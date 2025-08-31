@@ -18,6 +18,7 @@ from transformers.quantum_dropout import quantum_dropout
 from pro_metrics import tokenize, lowercase
 from pro_memory import DB_PATH
 import pro_memory
+from metrics.timing import timed
 
 TRANSFORMER_PATH = "pro_transformer.npz"
 
@@ -164,6 +165,7 @@ async def wait_save_task() -> None:
         _SAVE_TASK = None
 
 
+@timed
 async def update(word_list: List[str]) -> None:
     """Update the co-occurrence graph and vectors with new words.
 

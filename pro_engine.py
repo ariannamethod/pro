@@ -782,6 +782,239 @@ class ProEngine:
         best_seq = beams[0][0] if beams else start_seq
         return best_seq[:target_length]
 
+    async def _prepare_analog_map(self, forbidden: Set[str]) -> Dict[str, str]:
+        """Build a map of forbidden tokens to their analogs."""
+
+        analog_map: Dict[str, str] = {}
+        analog_lock = asyncio.Lock()
+
+        async def _build_analog(tok: str) -> None:
+            suggestions = await pro_predict.suggest_async(tok, topn=1)
+            analog = suggestions[0] if suggestions else None
+            if not analog:
+                analog = await asyncio.to_thread(pro_predict.lookup_analogs, tok)
+            if analog:
+                async with analog_lock:
+                    analog_map[tok] = analog
+
+        await asyncio.gather(*(_build_analog(tok) for tok in forbidden))
+        return analog_map
+
+    def _compute_target_length(
+        self,
+        tokens: List[str],
+        min_len: int = 6,
+        max_len: int = 10,
+        keys: Optional[List[str]] = None,
+    ) -> Tuple[Dict, int]:
+        """Return metrics and target length for *tokens*."""
+
+        metrics = compute_metrics(
+            [w.lower() for w in tokens if w],
+            self.state.get("trigram_counts", {}),
+            self.state.get("bigram_counts", {}),
+            self.state.get("word_counts", {}),
+            self.state.get("char_ngram_counts", {}),
+        )
+        metrics_for_len = {k: metrics[k] for k in keys} if keys else metrics
+        target = target_length_from_metrics(
+            metrics_for_len, min_len=min_len, max_len=max_len
+        )
+        return metrics, target
+
+    async def _build_first_phrase(
+        self,
+        attempt_seeds: List[str],
+        target_length: int,
+        forbidden: Set[str],
+        cf: float,
+        vocab: Dict[str, int],
+        analog_map: Dict[str, str],
+    ) -> Tuple[str, List[str], List[str]]:
+        """Construct the first sentence.
+
+        Returns the sentence, its lowercase words and the ordered vocabulary
+        used during construction.
+        """
+
+        async def _lookup_seed(w: str) -> Tuple[str, str]:
+            analog = await asyncio.to_thread(
+                pro_predict.lookup_analogs, w.lower()
+            ) or w
+            if w.isupper():
+                analog = analog.upper()
+            elif w and w[0].isupper():
+                analog = analog[0].upper() + analog[1:]
+            return w, analog
+
+        seed_results = await asyncio.gather(
+            *(_lookup_seed(w) for w in attempt_seeds)
+        )
+        bigram_inv = self.state.get("bigram_inv", {})
+        trigram_inv = self.state.get("trigram_inv", {})
+        inv_scores: Dict[str, float] = {}
+        for w in attempt_seeds:
+            lw = w.lower()
+            bi_val = max(
+                (bigram_inv.get(p, {}).get(lw, 0.0) for p in bigram_inv),
+                default=0.0,
+            )
+            tri_val = max(
+                (trigram_inv.get(k, {}).get(lw, 0.0) for k in trigram_inv),
+                default=0.0,
+            )
+            inv_scores[lw] = max(bi_val, tri_val)
+        max_inv = max(inv_scores.values(), default=0.0)
+        high_inv_words = {
+            w for w, v in inv_scores.items() if v == max_inv and v > 0.0
+        }
+
+        words: List[str] = []
+        tracker: Set[str] = set()
+        for _, analog in seed_results:
+            if analog and analog.lower() not in forbidden and analog not in tracker:
+                words.append(analog)
+                tracker.add(analog)
+
+        word_counts = self.state.get("word_counts", {})
+        combined_counts: Dict[str, float] = dict(word_counts)
+        for w, weight in vocab.items():
+            lw = w.lower()
+            if lw in forbidden and lw not in analog_map:
+                continue
+            w = analog_map.get(lw, w)
+            combined_counts[w] = combined_counts.get(w, 0) + weight
+
+        async def _lookup_inv(w: str) -> Tuple[str, Optional[str]]:
+            analog = await asyncio.to_thread(pro_predict.lookup_analogs, w)
+            return w, analog
+
+        inv_results = await asyncio.gather(
+            *(_lookup_inv(w) for w in high_inv_words)
+        )
+        for w, analog in inv_results:
+            if analog:
+                combined_counts[analog] = (
+                    combined_counts.get(analog, 0.0)
+                    + combined_counts.get(w, 0.0)
+                    + 1.0
+                )
+                combined_counts.pop(w, None)
+                tracker.discard(w)
+        ordered = sorted(combined_counts, key=combined_counts.get, reverse=True)
+        for w in ordered:
+            if len(words) >= 2:
+                break
+            if w and w.lower() not in forbidden and w not in tracker:
+                words.append(w)
+                tracker.add(w)
+        while len(words) < 2:
+            words.append("")
+        words = await asyncio.to_thread(
+            self.plan_sentence,
+            words,
+            target_length,
+            forbidden=forbidden,
+            chaos_factor=cf,
+        )
+        first = words[0]
+        if first and first[0].isalpha():
+            first = first[0].upper() + first[1:]
+        words[0] = first
+        sentence1 = " ".join(filter(None, words[:target_length])) + "."
+        last1 = sentence1.rstrip(".").split()[-1].lower()
+        if last1 in FORBIDDEN_ENDINGS:
+            replacement = next(
+                (w for w in ordered if w.lower() not in FORBIDDEN_ENDINGS),
+                last1,
+            )
+            parts = sentence1.rstrip(".").split()
+            parts[-1] = replacement
+            sentence1 = " ".join(parts) + "."
+        first_words = lowercase(tokenize(sentence1))
+        return sentence1, first_words, ordered
+
+    async def _build_second_phrase(
+        self,
+        first_words: List[str],
+        ordered: List[str],
+        similarity_threshold: float,
+        forbidden: Set[str],
+        cf: float,
+    ) -> str:
+        """Construct the second sentence based on *first_words*."""
+
+        await pro_predict._ensure_vectors()
+        vectors = pro_predict._VECTORS
+
+        def _compute_scores(
+            first_words: List[str], tracker: Set[str], vectors: Dict[str, Dict[str, float]]
+        ) -> Dict[str, float]:
+            def _cos(a: Dict[str, float], b: Dict[str, float]) -> float:
+                keys = set(a) | set(b)
+                dot = sum(a.get(k, 0.0) * b.get(k, 0.0) for k in keys)
+                na = math.sqrt(sum(v * v for v in a.values()))
+                nb = math.sqrt(sum(v * v for v in b.values()))
+                if na == 0 or nb == 0:
+                    return 0.0
+                return dot / (na * nb)
+
+            first_vecs = [vectors[w] for w in first_words if w in vectors]
+            scores_local: Dict[str, float] = {}
+            for word, vec in vectors.items():
+                if word in tracker:
+                    continue
+                if first_vecs:
+                    sim = max(_cos(vec, fv) for fv in first_vecs)
+                else:
+                    sim = 0.0
+                scores_local[word] = sim
+            return scores_local
+
+        tracker = set(first_words)
+        scores = await asyncio.to_thread(
+            _compute_scores, first_words, tracker, vectors
+        )
+        eligible = [w for w, s in scores.items() if s < similarity_threshold]
+        if eligible:
+            ordered2 = sorted(eligible, key=lambda w: scores[w])
+        else:
+            ordered2 = (
+                [w for w, _ in sorted(scores.items(), key=lambda x: x[1])]
+                if scores
+                else [w for w in ordered if w not in tracker]
+            )
+        second_seeds = ordered2[:2]
+
+        _, target_length2 = self._compute_target_length(
+            first_words,
+            min_len=5,
+            max_len=6,
+            keys=["entropy", "perplexity"],
+        )
+        words2 = await asyncio.to_thread(
+            self.plan_sentence,
+            second_seeds,
+            target_length2,
+            forbidden=set(first_words) | forbidden,
+            chaos_factor=cf,
+        )
+        first2 = words2[0]
+        if first2 and first2[0].isalpha():
+            first2 = first2[0].upper() + first2[1:]
+        words2[0] = first2
+        sentence2 = " ".join(filter(None, words2[:target_length2])) + "."
+        last2 = sentence2.rstrip(".").split()[-1].lower()
+        if last2 in FORBIDDEN_ENDINGS:
+            replacement2 = next(
+                (w for w in ordered2 if w.lower() not in FORBIDDEN_ENDINGS),
+                last2,
+            )
+            parts2 = sentence2.rstrip(".").split()
+            parts2[-1] = replacement2
+            sentence2 = " ".join(parts2) + "."
+        return sentence2
+
     @timed
     async def respond(
         self,
@@ -812,19 +1045,8 @@ class ProEngine:
             else similarity_threshold
         )
         forbidden = {w.lower() for w in (forbidden or set())}
-        analog_map: Dict[str, str] = {}
-        analog_lock = asyncio.Lock()
+        analog_map = await self._prepare_analog_map(forbidden)
 
-        async def _build_analog(tok: str) -> None:
-            suggestions = await pro_predict.suggest_async(tok, topn=1)
-            analog = suggestions[0] if suggestions else None
-            if not analog:
-                analog = await asyncio.to_thread(pro_predict.lookup_analogs, tok)
-            if analog:
-                async with analog_lock:
-                    analog_map[tok] = analog
-
-        await asyncio.gather(*(_build_analog(tok) for tok in forbidden))
         ordered_vocab: List[str] = []
         seen_vocab: Set[str] = set()
         for w, _ in sorted(vocab.items(), key=lambda x: x[1], reverse=True):
@@ -845,213 +1067,26 @@ class ProEngine:
             elif w and w[0].isupper():
                 repl = repl[0].upper() + repl[1:]
             attempt_seeds.append(repl)
+
         extra_idx = 0
         while True:
-            def _metrics_and_length() -> Tuple[Dict, int]:
-                tokens = [w.lower() for w in attempt_seeds if w]
-                metrics_local = compute_metrics(
-                    tokens,
-                    self.state.get("trigram_counts", {}),
-                    self.state.get("bigram_counts", {}),
-                    self.state.get("word_counts", {}),
-                    self.state.get("char_ngram_counts", {}),
-                )
-                return metrics_local, target_length_from_metrics(metrics_local)
-
-            async def _lookup_seeds() -> List[Tuple[str, str]]:
-                async def _lookup_seed(w: str) -> Tuple[str, str]:
-                    analog = await asyncio.to_thread(
-                        pro_predict.lookup_analogs, w.lower()
-                    ) or w
-                    if w.isupper():
-                        analog = analog.upper()
-                    elif w and w[0].isupper():
-                        analog = analog[0].upper() + analog[1:]
-                    return w, analog
-
-                return await asyncio.gather(*(_lookup_seed(w) for w in attempt_seeds))
-
-            async with asyncio.TaskGroup() as tg:
-                metrics_task = tg.create_task(asyncio.to_thread(_metrics_and_length))
-                seed_task = tg.create_task(_lookup_seeds())
-                tg.create_task(self._forecast(attempt_seeds))
-
-            metrics, target_length = metrics_task.result()
-            seed_results = seed_task.result()
-            bigram_inv = self.state.get("bigram_inv", {})
-            trigram_inv = self.state.get("trigram_inv", {})
-            inv_scores: Dict[str, float] = {}
-            for w in attempt_seeds:
-                lw = w.lower()
-                bi_val = max(
-                    (bigram_inv.get(p, {}).get(lw, 0.0) for p in bigram_inv),
-                    default=0.0,
-                )
-                tri_val = max(
-                    (trigram_inv.get(k, {}).get(lw, 0.0) for k in trigram_inv),
-                    default=0.0,
-                )
-                inv_scores[lw] = max(bi_val, tri_val)
-            max_inv = max(inv_scores.values(), default=0.0)
-            high_inv_words = {
-                w for w, v in inv_scores.items() if v == max_inv and v > 0.0
-            }
-
-            words: List[str] = []
-            tracker: Set[str] = set()
-            for _, analog in seed_results:
-                if analog and analog.lower() not in forbidden and analog not in tracker:
-                    words.append(analog)
-                    tracker.add(analog)
-            word_counts = self.state.get("word_counts", {})
-            combined_counts: Dict[str, float] = dict(word_counts)
-            for w, weight in vocab.items():
-                lw = w.lower()
-                if lw in forbidden and lw not in analog_map:
-                    continue
-                w = analog_map.get(lw, w)
-                combined_counts[w] = combined_counts.get(w, 0) + weight
-
-            async def _lookup_inv(w: str) -> Tuple[str, Optional[str]]:
-                analog = await asyncio.to_thread(pro_predict.lookup_analogs, w)
-                return w, analog
-
-            inv_results = await asyncio.gather(*(_lookup_inv(w) for w in high_inv_words))
-            for w, analog in inv_results:
-                if analog:
-                    combined_counts[analog] = (
-                        combined_counts.get(analog, 0.0)
-                        + combined_counts.get(w, 0.0)
-                        + 1.0
-                    )
-                    combined_counts.pop(w, None)
-                    tracker.discard(w)
-            ordered = sorted(
-                combined_counts, key=combined_counts.get, reverse=True
-            )
-            for w in ordered:
-                if len(words) >= 2:
-                    break
-                if w and w.lower() not in forbidden and w not in tracker:
-                    words.append(w)
-                    tracker.add(w)
-            while len(words) < 2:
-                words.append("")
-            words = await asyncio.to_thread(
-                self.plan_sentence,
-                words,
+            _, target_length = self._compute_target_length(attempt_seeds)
+            await self._forecast(attempt_seeds)
+            sentence1, first_words, ordered = await self._build_first_phrase(
+                attempt_seeds,
                 target_length,
-                forbidden=forbidden,
-                chaos_factor=cf,
+                forbidden,
+                cf,
+                vocab,
+                analog_map,
             )
-            first = words[0]
-            if first and first[0].isalpha():
-                first = first[0].upper() + first[1:]
-            words[0] = first
-            sentence1 = " ".join(filter(None, words[:target_length])) + "."
-            first_words = lowercase(tokenize(sentence1))
-            tracker = set(first_words)
-
-            # ----- Second sentence: choose semantically distant seeds -----
-            await pro_predict._ensure_vectors()
-            vectors = pro_predict._VECTORS
-
-            def _compute_scores(
-                first_words: List[str], tracker: Set[str], vectors: Dict[str, Dict[str, float]]
-            ) -> Dict[str, float]:
-                def _cos(a: Dict[str, float], b: Dict[str, float]) -> float:
-                    keys = set(a) | set(b)
-                    dot = sum(a.get(k, 0.0) * b.get(k, 0.0) for k in keys)
-                    na = math.sqrt(sum(v * v for v in a.values()))
-                    nb = math.sqrt(sum(v * v for v in b.values()))
-                    if na == 0 or nb == 0:
-                        return 0.0
-                    return dot / (na * nb)
-
-                first_vecs = [vectors[w] for w in first_words if w in vectors]
-                scores_local: Dict[str, float] = {}
-                for word, vec in vectors.items():
-                    if word in tracker:
-                        continue
-                    if first_vecs:
-                        sim = max(_cos(vec, fv) for fv in first_vecs)
-                    else:
-                        sim = 0.0
-                    scores_local[word] = sim
-                return scores_local
-
-            scores = await asyncio.to_thread(
-                _compute_scores, first_words, tracker, vectors
-            )
-            sim_thresh = similarity_threshold
-            eligible = [w for w, s in scores.items() if s < sim_thresh]
-            if eligible:
-                ordered2 = sorted(eligible, key=lambda w: scores[w])
-            else:
-                ordered2 = (
-                    [w for w, _ in sorted(scores.items(), key=lambda x: x[1])]
-                    if scores
-                    else [w for w in ordered if w not in tracker]
-                )
-            second_seeds = ordered2[:2]
-
-            metrics_first = await asyncio.to_thread(
-                compute_metrics,
+            sentence2 = await self._build_second_phrase(
                 first_words,
-                self.state.get("trigram_counts", {}),
-                self.state.get("bigram_counts", {}),
-                self.state.get("word_counts", {}),
-                self.state.get("char_ngram_counts", {}),
+                ordered,
+                similarity_threshold,
+                forbidden,
+                cf,
             )
-            target_length2 = await asyncio.to_thread(
-                target_length_from_metrics,
-                {
-                    "entropy": metrics_first["entropy"],
-                    "perplexity": metrics_first["perplexity"],
-                },
-                min_len=5,
-                max_len=6,
-            )
-            words2 = await asyncio.to_thread(
-                self.plan_sentence,
-                second_seeds,
-                target_length2,
-                forbidden=set(first_words) | forbidden,
-                chaos_factor=cf,
-            )
-            first2 = words2[0]
-            if first2 and first2[0].isalpha():
-                first2 = first2[0].upper() + first2[1:]
-            words2[0] = first2
-            sentence2 = " ".join(filter(None, words2[:target_length2])) + "."
-            last1 = sentence1.rstrip(".").split()[-1].lower()
-            if last1 in FORBIDDEN_ENDINGS:
-                replacement = next(
-                    (
-                        w
-                        for w in ordered
-                        if w.lower() not in FORBIDDEN_ENDINGS
-                    ),
-                    last1,
-                )
-                parts = sentence1.rstrip(".").split()
-                parts[-1] = replacement
-                sentence1 = " ".join(parts) + "."
-
-            last2 = sentence2.rstrip(".").split()[-1].lower()
-            if last2 in FORBIDDEN_ENDINGS:
-                replacement2 = next(
-                    (
-                        w
-                        for w in ordered2
-                        if w.lower() not in FORBIDDEN_ENDINGS
-                    ),
-                    last2,
-                )
-                parts2 = sentence2.rstrip(".").split()
-                parts2[-1] = replacement2
-                sentence2 = " ".join(parts2) + "."
-
             response = sentence1 + " " + sentence2
             for tok, analog in analog_map.items():
                 pattern = re.compile(rf"\b{re.escape(tok)}\b", re.IGNORECASE)

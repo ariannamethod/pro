@@ -3,6 +3,10 @@
 
 *Second name: PRO — Pure Recursive Organism*
 
+## Surprising Cat Fact
+
+In 1879, the city of Liège in Belgium attempted to use 37 cats to deliver mail. The feline postal service was short-lived.
+
 ## Installation
 
 ```bash

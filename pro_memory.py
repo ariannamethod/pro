@@ -113,8 +113,22 @@ async def reset_adapter_usage() -> None:
         await asyncio.to_thread(conn.execute, "DELETE FROM adapter_usage")
         await asyncio.to_thread(conn.commit)
 
+def _close_db_sync() -> None:
+    """Synchronously close the database connection pool.
 
-atexit.register(lambda: asyncio.run(close_db()))
+    If an event loop is already running, ``close_db`` is scheduled on that
+    loop.  Otherwise, the coroutine is executed in a new event loop via
+    :func:`asyncio.run`.
+    """
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        asyncio.run(close_db())
+    else:
+        loop.create_task(close_db())
+
+
+atexit.register(_close_db_sync)
 
 
 async def add_message(content: str, tag: Optional[str] = None) -> None:

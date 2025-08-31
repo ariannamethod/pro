@@ -118,4 +118,18 @@ async def execute_cached(
     return rows
 
 
-atexit.register(lambda: asyncio.run(close_pool()))
+def _close_pool_sync() -> None:
+    """Synchronously close the connection pool.
+
+    If an event loop is active, the ``close_pool`` coroutine is scheduled on it.
+    Otherwise, a new event loop is created to run the coroutine to completion.
+    """
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        asyncio.run(close_pool())
+    else:
+        loop.create_task(close_pool())
+
+
+atexit.register(_close_pool_sync)

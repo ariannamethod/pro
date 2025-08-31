@@ -75,6 +75,7 @@ class ProEngine:
         self._tune_worker_task: Optional[asyncio.Task] = None
         self._watcher_task: Optional[asyncio.Task] = None
         self._tune_tasks: List[asyncio.Task] = []
+        self._running_tasks: List[asyncio.Task] = []
         self._tune_semaphore = asyncio.BoundedSemaphore(TUNE_CONCURRENCY)
         self._compression_task: Optional[asyncio.Task] = None
         self._dream_task: Optional[asyncio.Task] = None
@@ -272,10 +273,11 @@ class ProEngine:
                     logging.error("Dataset scan failed: %s", exc)
 
         self._watcher_task = asyncio.create_task(_watch_datasets())
+        self._running_tasks.append(self._watcher_task)
 
         async def _compression_worker() -> None:
-            while True:
-                try:
+            try:
+                while True:
                     count = await pro_memory.total_adapter_usage()
                     if count >= COMPRESSION_INTERVAL:
                         try:
@@ -286,15 +288,17 @@ class ProEngine:
                             logging.error("Compression failed: %s", exc)
                         await pro_memory.reset_adapter_usage()
                     await asyncio.sleep(0.1)
-                except asyncio.CancelledError:
-                    break
+            except asyncio.CancelledError:
+                raise
 
         self._compression_task = asyncio.create_task(_compression_worker())
+        self._running_tasks.append(self._compression_task)
         self._start_dream_worker()
 
     def _start_dream_worker(self) -> None:
         if self._dream_task is None or self._dream_task.done():
             self._dream_task = asyncio.create_task(self._dream_worker())
+            self._running_tasks.append(self._dream_task)
 
     async def _system_idle(self) -> bool:
         try:
@@ -334,7 +338,7 @@ class ProEngine:
     def _start_tune_worker(self) -> None:
         if self._tune_worker_task is None or self._tune_worker_task.done():
             self._tune_worker_task = asyncio.create_task(self._tune_worker())
-            self._tune_tasks.append(self._tune_worker_task)
+            self._running_tasks.append(self._tune_worker_task)
 
     async def _tune_worker(self) -> None:
         try:
@@ -348,7 +352,7 @@ class ProEngine:
                 finally:
                     self.dataset_queue.task_done()
         except asyncio.CancelledError:  # pragma: no cover - worker shutdown
-            pass
+            raise
 
     async def save_state(self) -> None:
         await asyncio.to_thread(pro_tune.save_state, self.state, STATE_PATH)
@@ -448,21 +452,10 @@ class ProEngine:
             logging.error("Spawning specialist failed: %s", exc)
 
     async def shutdown(self) -> None:
-        tasks: List[asyncio.Task] = []
-        if self._watcher_task is not None:
-            self._watcher_task.cancel()
-            tasks.append(self._watcher_task)
-        for task in self._tune_tasks:
+        for task in self._running_tasks:
             task.cancel()
-            tasks.append(task)
-        if self._compression_task is not None:
-            self._compression_task.cancel()
-            tasks.append(self._compression_task)
-        if self._dream_task is not None:
-            self._dream_task.cancel()
-            tasks.append(self._dream_task)
-        if tasks:
-            await asyncio.gather(*tasks, return_exceptions=True)
+        if self._running_tasks:
+            await asyncio.gather(*self._running_tasks, return_exceptions=True)
         await pro_predict.wait_save_task()
 
     def compute_charged_words(self, words: List[str]) -> List[str]:
@@ -1093,6 +1086,7 @@ class ProEngine:
                 logging.error("Updating dataset hash failed: %s", exc)
             task = asyncio.create_task(self._async_tune([dataset_path]))
             self._tune_tasks.append(task)
+            self._running_tasks.append(task)
         except Exception as exc:  # pragma: no cover - logging side effect
             logging.error("Logging conversation failed: %s", exc)
         await asyncio.to_thread(

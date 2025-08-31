@@ -85,7 +85,8 @@ class GraphRetriever:
         self.store = store
 
     def last_message(self, dialogue_id: str, speaker: str) -> Optional[str]:
-        """Return the most recent message for ``speaker`` in ``dialogue_id``."""
+        """Return the most recent message for ``speaker`` in
+        ``dialogue_id``."""
 
         dialogue = self.store.get_dialogue(dialogue_id)
         for node in reversed(dialogue):
@@ -97,3 +98,10 @@ class GraphRetriever:
         """Return all message texts from ``dialogue_id``."""
 
         return [node.text for node in self.store.get_dialogue(dialogue_id)]
+
+    def recent_messages(self, dialogue_id: str, n: int = 3) -> List[str]:
+        """Return the last ``n`` message texts from ``dialogue_id``."""
+
+        dialogue = self.store.get_dialogue(dialogue_id)
+        recent = dialogue[-n:]
+        return [node.text for node in recent]

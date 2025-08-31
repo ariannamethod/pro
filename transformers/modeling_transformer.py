@@ -23,6 +23,7 @@ from memory.memory_graph import GraphRetriever
 from memory.reinforce_retriever import ReinforceRetriever
 from .quantum_attention import QuantumAttention
 from .quantum_memory_attention import QuantumMemoryAttention
+from .blocks.attention import HoloMemoryGate
 
 
 _kernel: Optional[Callable[[np.ndarray, np.ndarray], np.ndarray]] = None
@@ -105,6 +106,7 @@ class MemoryAttention:
     ) -> None:
         self.retriever = retriever
         self.dim = dim
+        self.gate = HoloMemoryGate(retriever, dim)
 
     def _encode(self, text: str) -> np.ndarray:
         """Encode ``text`` into a deterministic vector.
@@ -147,6 +149,8 @@ class MemoryAttention:
     ) -> np.ndarray:
         """Return ``hidden_states`` enriched with memory from the graph."""
         adapter_vec = ResonantAdapter(1.0, 0.1)(hidden_states.shape[-1])
+        holo = self.gate(dialogue_id).real.astype(hidden_states.dtype)
+        hidden_states = hidden_states + holo
 
         if hasattr(self.retriever, "retrieve"):
             mem_vec = self.retriever.retrieve(dialogue_id, speaker)
@@ -218,6 +222,7 @@ class QuantumMemoryLayer:
         backend: QuantumAttention | None = None,
     ) -> None:
         self.attention = QuantumMemoryAttention(retriever, backend)
+        self.gate = HoloMemoryGate(retriever, retriever.dim)
 
     def __call__(
         self,
@@ -227,6 +232,8 @@ class QuantumMemoryLayer:
         dialogue_id: str,
         speaker: str,
     ) -> tuple[np.ndarray, np.ndarray]:
+        holo = self.gate(dialogue_id).real.astype(query.dtype)
+        query = query + holo
         return self.attention.attention(
             query, key, value, dialogue_id, speaker
         )

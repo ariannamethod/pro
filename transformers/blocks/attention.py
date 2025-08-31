@@ -1,6 +1,9 @@
 import numpy as np
 import numpy.typing as npt
 
+from morphology import encode as encode_morph
+from memory.memory_graph import GraphRetriever
+
 
 class ResonantDropout:
     """Dropout with sinusoidal per-dimension probabilities.
@@ -58,6 +61,31 @@ class DynamicContextGate:
     def load_state_dict(self, state: dict) -> None:
         if "bias" in state:
             self.bias = state["bias"]
+
+
+class HoloMemoryGate:
+    """Generate a holographic vector from recent dialogue messages."""
+
+    def __init__(
+        self, retriever: GraphRetriever, dim: int, n: int = 3
+    ) -> None:
+        self.retriever = retriever
+        self.dim = dim
+        self.n = n
+
+    def __call__(self, dialogue_id: str) -> npt.NDArray[np.complex64]:
+        if not hasattr(self.retriever, "recent_messages"):
+            return np.zeros(self.dim, dtype=np.complex64)
+        msgs = self.retriever.recent_messages(dialogue_id, self.n)
+        if not msgs:
+            return np.zeros(self.dim, dtype=np.complex64)
+        vec = np.zeros(self.dim, dtype=np.float32)
+        for msg in msgs:
+            vec += encode_morph(msg, self.dim)
+        vec /= len(msgs)
+        phase = np.linspace(0, np.pi, self.dim, dtype=np.float32)
+        holo = vec * np.exp(1j * phase)
+        return holo.astype(np.complex64)
 
 
 def amplitude_attention(

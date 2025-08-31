@@ -39,6 +39,7 @@ async def main() -> None:
     await engine.setup()
     offset = None
     async with aiohttp.ClientSession() as session:
+        retry_count = 0
         try:
             while True:
                 try:
@@ -52,9 +53,12 @@ async def main() -> None:
                         if chat_id and text:
                             response, _ = await engine.process_message(text)
                             await send_message(session, chat_id, response)
+                    retry_count = 0
                 except Exception as exc:  # pragma: no cover - logging only
                     print(f"Error: {exc}")
-                    await asyncio.sleep(1)
+                    backoff = min(2 ** retry_count, 5)
+                    retry_count += 1
+                    await asyncio.sleep(backoff)
         finally:
             await engine.shutdown()
 

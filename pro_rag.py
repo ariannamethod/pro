@@ -7,7 +7,7 @@ from urllib import request, parse
 
 from pro_metrics import tokenize, lowercase
 import pro_memory
-from memory.memory_lattice import MemoryGraphStore
+from memory.store import MemoryStore
 import pro_predict
 
 
@@ -67,7 +67,7 @@ async def retrieve(
     limit: int = 5,
     external_source: str | None = None,
     external_limit: int = 3,
-    lattice: Optional[MemoryGraphStore] = None,
+    lattice: Optional[MemoryStore] = None,
 ) -> List[str]:
     """Retrieve context using graph links and embedding similarity."""
 
@@ -136,9 +136,9 @@ def _demo_training() -> None:
     step.
     """
 
-    from memory import MemoryGraphStore, ReinforceRetriever
+    from memory import MemoryStore, ReinforceRetriever
 
-    store = MemoryGraphStore()
+    store = MemoryStore()
     did = "demo"
     store.add_utterance(did, "user", "hello world")
     store.add_utterance(did, "user", "pizza is tasty")

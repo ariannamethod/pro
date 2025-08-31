@@ -10,7 +10,7 @@ from autograd import numpy as anp
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 
 import pro_memory  # noqa: E402
-from memory.memory_graph import MemoryGraphStore  # noqa: E402
+from memory import MemoryStore  # noqa: E402
 import morphology  # noqa: E402
 
 
@@ -25,7 +25,7 @@ async def test_store_and_fetch_similar_embeddings(tmp_path, monkeypatch):
     results = await pro_memory.fetch_similar_messages("hello there", top_k=1)
     assert results == ["hello world"]
     # Update the first embedding and ensure it persists
-    new_vec = np.ones_like(pro_memory._VECTORS[0])
+    new_vec = np.ones_like(pro_memory._STORE.embeddings[0])
     await pro_memory.persist_learned_vector(0, new_vec)
     conn = sqlite3.connect(str(db_path))
     cur = conn.execute("SELECT embedding FROM messages WHERE rowid = 1")
@@ -36,7 +36,7 @@ async def test_store_and_fetch_similar_embeddings(tmp_path, monkeypatch):
 
 
 def test_embedding_storage_and_gradient_retrieval():
-    store = MemoryGraphStore()
+    store = MemoryStore()
     text = "привет мир"
     emb = store.add_utterance("dlg", "user", text)
     dialogue = store.get_dialogue("dlg")

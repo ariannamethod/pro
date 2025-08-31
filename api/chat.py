@@ -1,7 +1,7 @@
 """Very small chat API integrating the memory graph.
 
 The API is purposely tiny – it merely demonstrates how dialogue turns are
-serialized into :class:`~memory.memory_graph.MemoryGraphStore`.  Each call to
+serialized into :class:`~memory.store.MemoryStore`.  Each call to
 :func:`ChatAPI.process_message` stores the message and returns a numerical
 representation that has been enriched by the :class:`~transformers.modeling_transformer.MemoryAttention`.
 """
@@ -12,7 +12,7 @@ from typing import Optional
 
 import numpy as np
 
-from memory.memory_graph import GraphRetriever, MemoryGraphStore
+from memory import GraphRetriever, MemoryStore
 from transformers.modeling_transformer import MemoryAttention
 
 
@@ -21,8 +21,8 @@ class ChatAPI:
 
     def __init__(self, path: Optional[str] = None, dim: int = 32) -> None:
         # ``path`` is accepted for backwards compatibility but the new
-        # ``MemoryGraphStore`` keeps all data in-memory.
-        self.store = MemoryGraphStore(dim=dim)
+        # ``MemoryStore`` keeps all data in-memory.
+        self.store = MemoryStore(dim=dim)
         self.retriever = GraphRetriever(self.store)
         self.attention = MemoryAttention(self.retriever, dim=dim)
 

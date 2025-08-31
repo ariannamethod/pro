@@ -2,7 +2,7 @@
 
 This file introduces :class:`MemoryAttention`, a simple mechanism that
 injects information retrieved from a memory graph into a sequence of hidden
-states.  By default it works with :class:`~memory.memory_graph.GraphRetriever`
+states.  By default it works with :class:`~memory.store.GraphRetriever`
 but it can also consume a
 :class:`~memory.reinforce_retriever.ReinforceRetriever` whose probability
 distribution over nodes defines a soft cross-attention.  The goal is not to
@@ -21,7 +21,7 @@ import morphology
 from .blocks.hyper_block import HyperBlock
 from .resonant_layers import HarmonicResonanceLayer
 
-from memory.memory_graph import GraphRetriever
+from memory import GraphRetriever
 from memory.reinforce_retriever import ReinforceRetriever
 from .quantum_attention import QuantumAttention
 from .quantum_memory_attention import QuantumMemoryAttention

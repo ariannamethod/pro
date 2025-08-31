@@ -5,12 +5,12 @@ from typing import Dict, List, Tuple, Optional
 import numpy as np
 import pro_rag_embedding
 from pro_memory_pool import init_pool, close_pool, get_connection
+from memory import MemoryStore
 
 DB_PATH = 'pro_memory.db'
 
 
-_VECTORS: np.ndarray | None = None
-_MESSAGES: List[str] = []
+_STORE: MemoryStore | None = None
 _ADAPTER_USAGE: Dict[str, int] = {}
 
 
@@ -48,36 +48,34 @@ async def persist_learned_vector(index: int, embedding: np.ndarray) -> None:
             (embedding.tobytes(), index + 1),
         )
         await asyncio.to_thread(conn.commit)
-    if _VECTORS is not None and index < _VECTORS.shape[0]:
-        _VECTORS[index] = embedding
+    if _STORE is not None and index < _STORE.embeddings.shape[0]:
+        _STORE.embeddings[index] = embedding
 
 
 def _add_to_index(content: str, embedding: np.ndarray) -> None:
     """Add a vector to the in-memory search index."""
-    global _VECTORS
-    vec = embedding.reshape(1, -1)
-    if _VECTORS is None:
-        _VECTORS = vec
-    else:
-        _VECTORS = np.vstack([_VECTORS, vec])
-    _MESSAGES.append(content)
+    global _STORE
+    if _STORE is None:
+        _STORE = MemoryStore(dim=embedding.shape[0])
+    _STORE.add_utterance("global", "user", content, embedding)
 
 
 async def build_index() -> None:
     """Load all stored embeddings into the in-memory index."""
-    global _VECTORS, _MESSAGES
+    global _STORE
     async with get_connection() as conn:
         cur = await asyncio.to_thread(
             conn.execute, 'SELECT content, embedding FROM messages'
         )
         rows = await asyncio.to_thread(cur.fetchall)
-    _MESSAGES = [r[0] for r in rows]
-    if rows:
-        _VECTORS = np.vstack(
-            [np.frombuffer(r[1], dtype=np.float32) for r in rows]
-        )
-    else:
-        _VECTORS = None
+    if not rows:
+        _STORE = None
+        return
+    first_vec = np.frombuffer(rows[0][1], dtype=np.float32)
+    _STORE = MemoryStore(dim=first_vec.shape[0])
+    for content, blob in rows:
+        vec = np.frombuffer(blob, dtype=np.float32)
+        _STORE.add_utterance("global", "user", content, vec)
 
 
 async def close_db() -> None:
@@ -142,12 +140,12 @@ async def store_if_novel(
     Returns:
         ``True`` if the message was stored, ``False`` otherwise.
     """
-    if _VECTORS is None or not _MESSAGES:
+    if _STORE is None or _STORE.embeddings.shape[0] == 0:
         await build_index()
 
     embedding = await encode_message(content)
-    if _VECTORS is not None:
-        distances = np.linalg.norm(_VECTORS - embedding, axis=1)
+    if _STORE is not None and _STORE.embeddings.shape[0]:
+        distances = np.linalg.norm(_STORE.embeddings - embedding, axis=1)
         if distances.size and float(distances.min()) < threshold:
             return False
 
@@ -248,18 +246,19 @@ async def fetch_recent_messages(limit: int = 50) -> List[Tuple[str, np.ndarray]]
 
 async def fetch_similar_messages(query: str, top_k: int = 5) -> List[str]:
     """Return top-k stored messages most similar to the query."""
-    if _VECTORS is None or not _MESSAGES:
+    if _STORE is None or _STORE.embeddings.shape[0] == 0:
         await build_index()
-    if _VECTORS is None or not _MESSAGES:
+    if _STORE is None or _STORE.embeddings.shape[0] == 0:
         return []
     q_vec = await encode_message(query)
-    vecs = _VECTORS
+    vecs = _STORE.embeddings
     norms = np.linalg.norm(vecs, axis=1, keepdims=True) + 1e-10
     vecs_norm = vecs / norms
     q_norm = q_vec / (np.linalg.norm(q_vec) + 1e-10)
     sims = vecs_norm @ q_norm
     top = np.argsort(sims)[-top_k:][::-1]
-    return [_MESSAGES[i] for i in top]
+    nodes = _STORE.graph.get("global", [])
+    return [nodes[i].text for i in top]
 
 
 async def fetch_related_concepts(words: List[str]) -> List[str]:

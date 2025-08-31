@@ -58,20 +58,31 @@ def _add_to_index(content: str, embedding: np.ndarray) -> None:
     _STORE.add_utterance("global", "user", content, embedding)
 
 
-async def build_index() -> None:
-    """Load all stored embeddings into the in-memory index."""
+async def build_index(batch_size: int = 100) -> None:
+    """Load all stored embeddings into the in-memory index in batches."""
     global _STORE
+    offset = 0
+    first_batch = True
     async with get_connection() as conn:
-        async with conn.execute('SELECT content, embedding FROM messages') as cur:
-            rows = await cur.fetchall()
-    if not rows:
+        while True:
+            async with conn.execute(
+                "SELECT content, embedding FROM messages LIMIT ? OFFSET ?",
+                (batch_size, offset),
+            ) as cur:
+                rows = await cur.fetchall()
+            if not rows:
+                break
+            if first_batch:
+                first_vec = np.frombuffer(rows[0][1], dtype=np.float32)
+                _STORE = MemoryStore(dim=first_vec.shape[0])
+                first_batch = False
+            for content, blob in rows:
+                vec = np.frombuffer(blob, dtype=np.float32)
+                _STORE.add_utterance("global", "user", content, vec)
+            offset += batch_size
+            await asyncio.sleep(0)
+    if first_batch:
         _STORE = None
-        return
-    first_vec = np.frombuffer(rows[0][1], dtype=np.float32)
-    _STORE = MemoryStore(dim=first_vec.shape[0])
-    for content, blob in rows:
-        vec = np.frombuffer(blob, dtype=np.float32)
-        _STORE.add_utterance("global", "user", content, vec)
 
 
 async def close_db() -> None:

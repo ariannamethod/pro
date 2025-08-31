@@ -37,6 +37,7 @@ from transformers.blocks import SymbolicReasoner
 from meta_controller import MetaController
 from api import vector_store
 import pro_spawn
+from metrics.timing import timed
 
 STATE_PATH = 'pro_state.json'
 HASH_PATH = 'dataset_sha.json'
@@ -898,6 +899,7 @@ class ProEngine:
         except Exception as exc:  # pragma: no cover - logging side effect
             logging.error("Preparing candidates failed: %s", exc)
 
+    @timed
     async def process_message(self, message: str) -> Tuple[str, Dict]:
         best = pro_meta.best_params()
         self.chaos_factor = best.get("chaos_factor", self.chaos_factor)

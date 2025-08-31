@@ -6,7 +6,12 @@ experiments and unit tests.
 """
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import numpy as np
+
+if TYPE_CHECKING:  # pragma: no cover - only used for typing
+    from quantum.attention_backend import AttentionBackend  # noqa: F401
 
 
 def _count_components(mask: np.ndarray) -> int:
@@ -47,6 +52,9 @@ def _betti_features(amplitudes: np.ndarray) -> np.ndarray:
 
 class QuantumAttention:
     """Simulate a minimal quantum attention mechanism.
+
+    Implements :class:`~quantum.attention_backend.AttentionBackend` using a
+    pure NumPy simulation.
 
     Parameters
     ----------

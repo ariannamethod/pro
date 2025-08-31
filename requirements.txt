@@ -5,3 +5,4 @@ aiosqlite
 watchfiles
 qiskit
 autograd
+aiohttp

@@ -4,3 +4,4 @@ numpy
 aiosqlite
 watchfiles
 qiskit
+autograd

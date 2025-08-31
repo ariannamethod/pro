@@ -2,10 +2,8 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass
 from typing import Dict, List, Optional, Any
-import json
-import os
 
 from autograd import numpy as anp
 
@@ -26,13 +24,10 @@ class MemoryNode:
 class MemoryStore:
     """Store dialogues with optional embeddings for retrieval."""
 
-    def __init__(self, dim: int = 32, path: Optional[str] = None) -> None:
+    def __init__(self, dim: int = 32) -> None:
         self.dim = dim
-        self.path = path
         self.graph: Dict[str, List[MemoryNode]] = {}
         self.embeddings = anp.zeros((0, dim))
-        if path and os.path.exists(path):
-            self.load(path)
 
     # ------------------------------------------------------------------ storage
     def add_utterance(
@@ -52,11 +47,11 @@ class MemoryStore:
         if isinstance(embedding, dict):
             node = MemoryNode(speaker, text, embedding=embedding)
             self.graph.setdefault(dialogue_id, []).append(node)
-            if self.path:
-                self.save(self.path)
             return None
 
-        vec = anp.array(embedding if embedding is not None else encode_morph(text, self.dim))
+        vec = anp.array(
+            embedding if embedding is not None else encode_morph(text, self.dim)
+        )
         if self.embeddings.size:
             self.embeddings = anp.vstack([self.embeddings, vec])
         else:
@@ -70,7 +65,9 @@ class MemoryStore:
         return list(self.graph.get(dialogue_id, []))
 
     # ---------------------------------------------------------------- embeddings
-    def embeddings_for(self, dialogue_id: str, speaker: Optional[str] = None) -> anp.ndarray:
+    def embeddings_for(
+        self, dialogue_id: str, speaker: Optional[str] = None
+    ) -> anp.ndarray:
         idxs = [
             n.index
             for n in self.graph.get(dialogue_id, [])
@@ -89,7 +86,11 @@ class MemoryStore:
     ) -> anp.ndarray:
         """Return a weighted memory vector for ``query`` using softmax weighting."""
 
-        vecs = embeddings if embeddings is not None else self.embeddings_for(dialogue_id, speaker)
+        vecs = (
+            embeddings
+            if embeddings is not None
+            else self.embeddings_for(dialogue_id, speaker)
+        )
         if vecs.shape[0] == 0:
             return anp.zeros(self.dim)
         scores = vecs @ query
@@ -98,35 +99,29 @@ class MemoryStore:
         weights = weights / anp.sum(weights)
         return weights @ vecs
 
-    # ---------------------------------------------------------------- persistence
-    def save(self, path: Optional[str] = None) -> None:
-        path = path or self.path
-        if not path:
-            return
-        data = {
-            did: [asdict(node) for node in nodes]
-            for did, nodes in self.graph.items()
-        }
-        with open(path, "w", encoding="utf-8") as fh:
-            json.dump(data, fh, ensure_ascii=False)
-        self.path = path
+    def most_similar(
+        self,
+        query: anp.ndarray,
+        top_k: int,
+        dialogue_id: str,
+        speaker: Optional[str] = None,
+    ) -> List[str]:
+        """Return texts of the ``top_k`` most similar utterances to ``query``."""
 
-    def load(self, path: str) -> None:
-        with open(path, "r", encoding="utf-8") as fh:
-            raw = json.load(fh)
-        self.graph = {}
-        vecs: List[List[float]] = []
-        for did, nodes in raw.items():
-            restored: List[MemoryNode] = []
-            for node in nodes:
-                mn = MemoryNode(**node)
-                if mn.morph_codes is not None:
-                    mn.index = len(vecs)
-                    vecs.append(mn.morph_codes)
-                restored.append(mn)
-            self.graph[did] = restored
-        self.embeddings = anp.array(vecs) if vecs else anp.zeros((0, self.dim))
-        self.path = path
+        nodes = [
+            n
+            for n in self.graph.get(dialogue_id, [])
+            if n.index is not None and (speaker is None or n.speaker == speaker)
+        ]
+        if not nodes:
+            return []
+        vecs = self.embeddings[[n.index for n in nodes]]
+        norms = anp.linalg.norm(vecs, axis=1, keepdims=True) + 1e-10
+        vecs_norm = vecs / norms
+        q_norm = query / (anp.linalg.norm(query) + 1e-10)
+        sims = vecs_norm @ q_norm
+        top = anp.argsort(sims)[-top_k:][::-1]
+        return [nodes[i].text for i in top]
 
 
 class GraphRetriever:

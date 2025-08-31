@@ -52,3 +52,11 @@ def test_embedding_storage_and_gradient_retrieval():
     grad_m = grad(lambda m: loss_fn(query, m))(store.embeddings)
     assert grad_q.shape == query.shape
     assert grad_m.shape == store.embeddings.shape
+
+
+def test_most_similar_texts():
+    store = MemoryStore(dim=2)
+    store.add_utterance("dlg", "user", "a", [1.0, 0.0])
+    store.add_utterance("dlg", "user", "b", [0.0, 1.0])
+    query = anp.array([0.9, 0.1])
+    assert store.most_similar(query, 1, "dlg") == ["a"]

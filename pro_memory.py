@@ -108,6 +108,7 @@ async def reset_adapter_usage() -> None:
         await conn.execute("DELETE FROM adapter_usage")
         await conn.commit()
 
+
 def _close_db_sync() -> None:
     """Synchronously close the database connection pool.
 
@@ -253,14 +254,7 @@ async def fetch_similar_messages(query: str, top_k: int = 5) -> List[str]:
     if _STORE is None or _STORE.embeddings.shape[0] == 0:
         return []
     q_vec = await encode_message(query)
-    vecs = _STORE.embeddings
-    norms = np.linalg.norm(vecs, axis=1, keepdims=True) + 1e-10
-    vecs_norm = vecs / norms
-    q_norm = q_vec / (np.linalg.norm(q_vec) + 1e-10)
-    sims = vecs_norm @ q_norm
-    top = np.argsort(sims)[-top_k:][::-1]
-    nodes = _STORE.graph.get("global", [])
-    return [nodes[i].text for i in top]
+    return _STORE.most_similar(q_vec, top_k, "global")
 
 
 async def fetch_related_concepts(words: List[str]) -> List[str]:

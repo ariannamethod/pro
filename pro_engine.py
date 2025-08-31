@@ -55,6 +55,43 @@ DREAM_TIMEOUT = 30
 
 FORBIDDEN_ENDINGS = {"the", "a", "and", "or", "his", "my", "their"}
 
+# Common template phrases that should be discouraged in responses.
+COMMON_TEMPLATES = {"V2.0"}
+
+
+def filter_similar_candidates(
+    candidates: List[Tuple[np.ndarray, str]], threshold: float = 0.98
+) -> List[Tuple[np.ndarray, str]]:
+    """Remove near-duplicate candidate responses.
+
+    Candidates with cosine similarity above *threshold* or identical text are
+    discarded, preserving the order of first occurrence.
+    """
+
+    unique: List[Tuple[np.ndarray, str]] = []
+    for emb, resp in candidates:
+        duplicate = False
+        for u_emb, u_resp in unique:
+            if resp == u_resp:
+                duplicate = True
+                break
+            if float(np.dot(emb, u_emb)) > threshold:
+                duplicate = True
+                break
+        if not duplicate:
+            unique.append((emb, resp))
+    return unique
+
+
+def template_penalty(response: str, counts: Dict[str, int]) -> float:
+    """Calculate a penalty for overused template phrases."""
+
+    penalty = 0.0
+    for phrase in COMMON_TEMPLATES:
+        if phrase in response:
+            penalty += 0.1 * (1 + counts.get(phrase, 0))
+    return penalty
+
 
 class ProEngine:
     def __init__(
@@ -1068,6 +1105,24 @@ class ProEngine:
         except Exception as exc:  # pragma: no cover - logging side effect
             logging.error("Preparing candidates failed: %s", exc)
 
+    def rank_candidates(
+        self, msg_emb: np.ndarray, topn: int = 5
+    ) -> List[Tuple[float, np.ndarray, str]]:
+        """Return up to *topn* best candidate responses.
+
+        Candidates are deduplicated using :func:`filter_similar_candidates` and
+        scored by cosine similarity minus a template phrase penalty.
+        """
+
+        candidates = filter_similar_candidates(list(self.candidate_buffer))
+        counts = self.state.setdefault("template_counts", {})
+        scored: List[Tuple[float, np.ndarray, str]] = []
+        for emb, resp in candidates:
+            score = float(np.dot(msg_emb, emb)) - template_penalty(resp, counts)
+            scored.append((score, emb, resp))
+        scored.sort(key=lambda x: x[0], reverse=True)
+        return scored[:topn]
+
     @timed
     async def process_message(self, message: str) -> Tuple[str, Dict]:
         best = pro_meta.best_params()
@@ -1213,17 +1268,11 @@ class ProEngine:
         combined_vocab = await asyncio.to_thread(
             _combine_vocab, mem_tokens, data_tokens
         )
-        best_candidate = None
-        best_sim = 0.0
-        for emb, resp in list(self.candidate_buffer):
-            sim = float(np.dot(msg_emb, emb))
-            if sim > best_sim:
-                best_sim = sim
-                best_candidate = (emb, resp)
-        if best_candidate and best_sim > 0.9:
-            response = best_candidate[1]
+        ranked = self.rank_candidates(msg_emb, topn=1)
+        if ranked and ranked[0][0] > 0.9:
+            _, emb, response = ranked[0]
             try:
-                self.candidate_buffer.remove(best_candidate)
+                self.candidate_buffer.remove((emb, response))
             except ValueError:
                 pass
         elif self.chaos_factor:
@@ -1241,6 +1290,10 @@ class ProEngine:
                 forbidden=user_forbidden,
                 update_meta=False,
             )
+        counts = self.state.setdefault("template_counts", {})
+        for tmpl in COMMON_TEMPLATES:
+            if tmpl in response:
+                counts[tmpl] = counts.get(tmpl, 0) + 1
         try:
             await pro_memory.add_message(response)
             try:

@@ -12,11 +12,12 @@ def _add_src_to_path() -> None:
 
 _add_src_to_path()
 
-from attention.complex_attention import ComplexAttention  # noqa: E402
+from attention import ComplexAttention  # noqa: E402
 
 
 def test_complex_attention_runs() -> None:
     attn = ComplexAttention(4)
     x = np.random.randn(2, 4)
     out = attn(x)
+    assert isinstance(out, np.ndarray)
     assert out.shape == (2, 4)

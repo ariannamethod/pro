@@ -12,6 +12,7 @@ from .reasoning import (
     SymbolicReasoner,
 )
 from .hyper_block import HyperBlock
+from .light_moe import LightweightMoEBlock
 
 __all__ = [
     "DynamicContextGate",
@@ -24,4 +25,5 @@ __all__ = [
     "SymbolicNot",
     "SymbolicReasoner",
     "HyperBlock",
+    "LightweightMoEBlock",
 ]

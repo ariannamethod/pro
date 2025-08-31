@@ -2,7 +2,7 @@ import json
 import os
 import asyncio
 import random
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 META_PATH = "pro_meta.json"
 
@@ -11,6 +11,7 @@ _best_params: Dict[str, float] = {
     "chaos_factor": 0.0,
     "similarity_threshold": 0.3,
 }
+_recompute_task: Optional[asyncio.Task] = None
 
 
 def _load() -> None:
@@ -43,10 +44,21 @@ async def _recompute() -> None:
     await asyncio.to_thread(_save)
 
 
+async def wait_recompute() -> None:
+    global _recompute_task
+    if _recompute_task is not None:
+        try:
+            await _recompute_task
+        except asyncio.CancelledError:
+            pass
+        _recompute_task = None
+
+
 def update(metrics: Dict[str, float], params: Dict[str, float]) -> None:
+    global _recompute_task
     _history.append({"metrics": metrics, "params": params})
     _save()
-    asyncio.create_task(_recompute())
+    _recompute_task = asyncio.create_task(_recompute())
 
 
 def best_params() -> Dict[str, float]:

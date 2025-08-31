@@ -7,6 +7,12 @@ import asyncio
 import os
 from typing import List, Optional
 
+# Torch is optional; when unavailable we fall back to CPU-only behaviour.
+try:  # pragma: no cover - best effort import
+    import torch
+except Exception:  # pragma: no cover - torch may not be installed
+    torch = None  # type: ignore[assignment]
+
 from self_reflect import SelfFineTuner
 
 INTERVAL_SECONDS = int(os.getenv("SELF_REFLECT_INTERVAL", "86400"))
@@ -14,8 +20,12 @@ INTERVAL_SECONDS = int(os.getenv("SELF_REFLECT_INTERVAL", "86400"))
 
 async def run_cycle(conversations: Optional[List[str]] = None) -> None:
     """Run a single self-reflection cycle."""
-    tuner = SelfFineTuner()
-    tuner.run(conversations or [], {})
+    tuner = (
+        SelfFineTuner(model=torch.device("cpu"))
+        if torch is not None
+        else SelfFineTuner()
+    )
+    tuner.run(conversations or [])
 
 
 async def main() -> None:

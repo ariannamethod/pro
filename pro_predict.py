@@ -391,10 +391,8 @@ class MiniSelfAttention:
         att = np.exp(att - att.max(axis=-1, keepdims=True))
         att = att / att.sum(axis=-1, keepdims=True)
         context = att @ v
-        rng = np.random.default_rng(0) if self.use_gate else None
-        context = quantum_dropout(context, rng=rng)
+        context = quantum_dropout(context)
         if self.gate:
-            self.gate.dropout.rng = np.random.default_rng(0)
             context = self.gate(context)
         pooled = context.mean(axis=0)
         out = pooled @ self.w_o
@@ -422,10 +420,8 @@ class MiniSelfAttention:
         att = np.exp(att - att.max(axis=-1, keepdims=True))
         att = att / att.sum(axis=-1, keepdims=True)
         context = att @ v
-        rng = np.random.default_rng(0) if self.use_gate else None
-        context = quantum_dropout(context, rng=rng)
+        context = quantum_dropout(context)
         if self.gate:
-            self.gate.dropout.rng = np.random.default_rng(0)
             context = self.gate(context)
         pooled = context.mean(axis=0)
         out = pooled @ self.w_o

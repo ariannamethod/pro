@@ -86,6 +86,8 @@ class ProEngine:
         self._watcher_task: Optional[asyncio.Task] = None
         self._tune_tasks: List[asyncio.Task] = []
         self._running_tasks: List[asyncio.Task] = []
+        self._candidate_queue: asyncio.Queue[None] = asyncio.Queue()
+        self._candidate_worker_task: Optional[asyncio.Task] = None
         self._tune_semaphore = asyncio.BoundedSemaphore(TUNE_CONCURRENCY)
         self._compression_task: Optional[asyncio.Task] = None
         self._dream_task: Optional[asyncio.Task] = None
@@ -404,6 +406,28 @@ class ProEngine:
             if self._dream_mode_task is not None:
                 self._dream_mode_task.cancel()
             pass
+
+    def _start_candidate_worker(self) -> None:
+        if (
+            self._candidate_worker_task is None
+            or self._candidate_worker_task.done()
+        ):
+            self._candidate_queue = asyncio.Queue()
+            self._candidate_worker_task = asyncio.create_task(
+                self._candidate_worker()
+            )
+            self._running_tasks.append(self._candidate_worker_task)
+
+    async def _candidate_worker(self) -> None:
+        try:
+            while True:
+                await self._candidate_queue.get()
+                try:
+                    await self.prepare_candidates()
+                finally:
+                    self._candidate_queue.task_done()
+        except asyncio.CancelledError:  # pragma: no cover - worker shutdown
+            raise
 
     def _start_tune_worker(self) -> None:
         if self._tune_worker_task is None or self._tune_worker_task.done():
@@ -1012,14 +1036,12 @@ class ProEngine:
         """Generate candidate responses for recent messages."""
         try:
             recent = await pro_memory.fetch_recent_messages(5)
-            new_cands = []
-            for msg, emb in recent:
-                seeds = tokenize(msg)
-                for _ in range(2):
-                    resp = await self.respond(seeds, update_meta=False)
-                    new_cands.append((emb, resp))
-            for cand in new_cands:
-                self.candidate_buffer.append(cand)
+            if not recent:
+                return
+            msg, emb = recent[0]
+            seeds = tokenize(msg)
+            resp = await self.respond(seeds, update_meta=False)
+            self.candidate_buffer.append((emb, resp))
         except Exception as exc:  # pragma: no cover - logging side effect
             logging.error("Preparing candidates failed: %s", exc)
 
@@ -1260,7 +1282,8 @@ class ProEngine:
             await self.save_state()
         except Exception as exc:  # pragma: no cover - logging side effect
             logging.error("Saving state failed: %s", exc)
-        asyncio.create_task(self.prepare_candidates())
+        self._start_candidate_worker()
+        self._candidate_queue.put_nowait(None)
         resp_metrics = await asyncio.to_thread(
             compute_metrics,
             lowercase(tokenize(response)),

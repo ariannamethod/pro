@@ -1,11 +1,16 @@
 """Simple training loop with layer evaluation and time folding."""
+import json
+from pathlib import Path
+from typing import List, Optional
+
+import numpy as np
 from autoadapt import LayerMutator, MetricMonitor
 from pro_evo import MiniModel
-import numpy as np
 from quantum_memory import QuantumMemory
 from transformers.time_fold import TimeFoldTransformer
 from pro_forecast import simulate_paths, backpropagate_forecast
 from resonance.p2p_resonance import P2PResonance
+from self_reflect.trainer import SelfFineTuner
 
 
 class Trainer:
@@ -34,7 +39,12 @@ class Trainer:
         self.sync_interval = sync_interval
         self.params = resonance_peer.params if resonance_peer else {}
 
-    def train_step(self, layer: str, metric: float) -> None:
+    def train_step(
+        self,
+        layer: str,
+        metric: float,
+        conversations: Optional[List[str]] = None,
+    ) -> None:
         """Simulate a training step and record metric for ``layer``."""
         forecast = simulate_paths([layer])
         backpropagate_forecast(forecast)
@@ -52,6 +62,7 @@ class Trainer:
         self.step += 1
         if self.step % self.eval_interval == 0:
             self._evaluate(layer)
+            self._meta_optimize(conversations or [])
 
     def evolve(self, layer: str, dialogue: list[str], metric: float) -> None:
         """Train a mini-model on a slice of dialogue and distill weights."""
@@ -67,6 +78,22 @@ class Trainer:
             # Boost the layer slightly if performance is lacking
             self.mutator.mutate(layer, 1.1)
             self.mutator.save(self.checkpoint_dir)
+
+    def _meta_optimize(self, conversations: List[str]) -> None:
+        """Invoke :class:`SelfFineTuner` and apply suggested updates."""
+        tuner = SelfFineTuner()
+        meta_dir = Path("logs/meta")
+        meta_dir.mkdir(parents=True, exist_ok=True)
+        before = self.params.copy()
+        before_file = meta_dir / f"epoch_{self.step}_before.json"
+        after_file = meta_dir / f"epoch_{self.step}_after.json"
+        with before_file.open("w", encoding="utf-8") as fh:
+            json.dump(before, fh)
+        deltas = tuner.run(conversations, self.params)
+        for name, delta in deltas.items():
+            self.params[name] = self.params.get(name, 0.0) + delta
+        with after_file.open("w", encoding="utf-8") as fh:
+            json.dump(self.params, fh)
 
     # Time folding ------------------------------------------------------
     def _gradient_echo(self, value: float) -> None:

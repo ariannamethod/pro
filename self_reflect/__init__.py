@@ -1,5 +1,5 @@
 """Utilities for the self-reflection training cycle."""
 
-from .trainer import WeaknessDetector, DataGenerator, SelfFineTuner
+from .trainer import MetaOptimizer, SelfFineTuner, WeaknessDetector
 
-__all__ = ["WeaknessDetector", "DataGenerator", "SelfFineTuner"]
+__all__ = ["WeaknessDetector", "MetaOptimizer", "SelfFineTuner"]

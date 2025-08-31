@@ -111,22 +111,36 @@ def load_embeddings(
         return pickle.load(fh)
 
 
-def _ensure_vectors() -> None:
+async def _ensure_vectors() -> None:
+    """Initialise the global co-occurrence graph and vectors.
+
+    Heavy file I/O and graph construction are executed in a thread so that
+    callers do not block the event loop. Only the shared state assignment is
+    protected by the vector lock.
+    """
+
     global _GRAPH, _VECTORS
+
+    # Fast path – already initialised.
     with _vector_lock():
         if _VECTORS:
             return
+
+    try:
+        graph, vectors = await asyncio.to_thread(load_embeddings)
+        if not vectors:
+            raise ValueError("empty embeddings")
+    except Exception:
+        graph = await asyncio.to_thread(_build_graph)
+        vectors = await asyncio.to_thread(_build_embeddings, graph)
         try:
-            _GRAPH, _VECTORS = load_embeddings()
-            if not _VECTORS:
-                raise ValueError("empty embeddings")
+            await asyncio.to_thread(save_embeddings, graph, vectors)
         except Exception:
-            _GRAPH = _build_graph()
-            _VECTORS = _build_embeddings(_GRAPH)
-            try:
-                save_embeddings(_GRAPH, _VECTORS)
-            except Exception:
-                pass
+            pass
+
+    with _vector_lock():
+        if not _VECTORS:
+            _GRAPH, _VECTORS = graph, vectors
 
 
 def _log_save_error(task: asyncio.Task) -> None:
@@ -157,8 +171,8 @@ async def update(word_list: List[str]) -> None:
     words become part of the internal vocabulary used by :func:`suggest`.
     """
     global _VECTORS, _SAVE_TASK
+    await _ensure_vectors()
     with _vector_lock():
-        _ensure_vectors()
         words = lowercase(word_list)
         for i, word in enumerate(words):
             for j in range(i + 1, len(words)):
@@ -215,8 +229,9 @@ def suggest(word: str, topn: int = 3) -> List[str]:
     co-occurrence embedding space is used. For out-of-vocabulary words a
     fuzzy string match against the vocabulary is performed.
     """
+    if not _VECTORS:
+        asyncio.run(_ensure_vectors())
     with _vector_lock():
-        _ensure_vectors()
         if word not in _GRAPH and word not in _VECTORS:
             return []
         neighbours = _GRAPH.get(word)

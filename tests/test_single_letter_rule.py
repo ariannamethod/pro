@@ -54,7 +54,11 @@ def test_second_sentence_respects_single_letter_rule(monkeypatch):
     engine.state["word_inv"] = {}
 
     monkeypatch.setattr(pro_predict, "lookup_analogs", lambda w: w)
-    monkeypatch.setattr(pro_predict, "_ensure_vectors", lambda: None)
+
+    async def _noop():
+        return None
+
+    monkeypatch.setattr(pro_predict, "_ensure_vectors", _noop)
     pro_predict._VECTORS = {w: {w: 1.0} for w in engine.state["word_counts"]}
 
     def fake_plan_sentence(self, initial, target_length, **kwargs):

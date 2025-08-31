@@ -21,7 +21,7 @@ from pro_metrics import (
 )
 import pro_tune
 import pro_sequence
-import pro_memory
+from memory import storage as memory_storage
 import pro_rag
 import pro_rag_embedding
 import pro_predict
@@ -256,8 +256,8 @@ class ProEngine:
                     logging.error(
                         "Initial training failed: %s", exc
                     )  # pragma: no cover - logging side effect
-        await pro_memory.init_db()
-        await pro_memory.build_index()
+        await memory_storage.init_db()
+        await memory_storage.build_index()
         logging.basicConfig(
             filename=LOG_PATH, level=logging.INFO, format='%(message)s'
         )  # noqa: E501
@@ -276,7 +276,7 @@ class ProEngine:
         async def _compression_worker() -> None:
             while True:
                 try:
-                    count = await pro_memory.total_adapter_usage()
+                    count = await memory_storage.total_adapter_usage()
                     if count >= COMPRESSION_INTERVAL:
                         try:
                             mut = LayerMutator(use_lora=True)
@@ -284,7 +284,7 @@ class ProEngine:
                             lora_utils.prune_and_merge(mut.lora_layers)
                         except Exception as exc:  # pragma: no cover - logging side effect
                             logging.error("Compression failed: %s", exc)
-                        await pro_memory.reset_adapter_usage()
+                        await memory_storage.reset_adapter_usage()
                     await asyncio.sleep(0.1)
                 except asyncio.CancelledError:
                     break
@@ -864,9 +864,9 @@ class ProEngine:
                 response = pattern.sub(analog, response)
             if (
                 grammar_filters.passes_filters(response)
-                and await pro_memory.is_unique(response)
+                and await memory_storage.is_unique(response)
             ):
-                await pro_memory.store_response(response)
+                await memory_storage.store_response(response)
                 if update_meta:
                     resp_metrics = await asyncio.to_thread(
                         compute_metrics,
@@ -893,7 +893,7 @@ class ProEngine:
     async def prepare_candidates(self) -> None:
         """Generate candidate responses for recent messages."""
         try:
-            recent = await pro_memory.fetch_recent_messages(5)
+            recent = await memory_storage.fetch_recent_messages(5)
             new_cands = []
             for msg, emb in recent:
                 seeds = tokenize(msg)
@@ -947,11 +947,11 @@ class ProEngine:
         predicted.extend(blend)
         memory_context: List[str] = []
         try:
-            memory_context = await pro_memory.fetch_similar_messages(
+            memory_context = await memory_storage.fetch_similar_messages(
                 message, top_k=5
             )
             try:
-                emb = await pro_memory.encode_message(message)
+                emb = await memory_storage.encode_message(message)
                 ext_hits = await vector_store.query(emb.tolist(), top_k=5)
                 memory_context.extend(ext_hits)
             except Exception as exc:  # pragma: no cover - logging side effect
@@ -959,9 +959,9 @@ class ProEngine:
         except Exception as exc:  # pragma: no cover - logging side effect
             logging.error("Memory retrieval failed: %s", exc)
         try:
-            await pro_memory.add_message(message)
+            await memory_storage.add_message(message)
             try:
-                emb = await pro_memory.encode_message(message)
+                emb = await memory_storage.encode_message(message)
                 await vector_store.upsert(message, emb.tolist())
             except Exception as exc:  # pragma: no cover - logging side effect
                 logging.error("External store upsert failed: %s", exc)
@@ -990,7 +990,7 @@ class ProEngine:
             self.state['char_ngram_counts'],
         )
         seed_words = original_words + context_tokens + predicted
-        recent_msgs, recent_resps = await pro_memory.fetch_recent(50)
+        recent_msgs, recent_resps = await memory_storage.fetch_recent(50)
 
         def _gather_tokens(texts: List[str]) -> List[str]:
             tokens: List[str] = []
@@ -1066,9 +1066,9 @@ class ProEngine:
                 update_meta=False,
             )
         try:
-            await pro_memory.add_message(response)
+            await memory_storage.add_message(response)
             try:
-                emb = await pro_memory.encode_message(response)
+                emb = await memory_storage.encode_message(response)
                 await vector_store.upsert(response, emb.tolist())
             except Exception as exc:  # pragma: no cover - logging side effect
                 logging.error("External store upsert failed: %s", exc)

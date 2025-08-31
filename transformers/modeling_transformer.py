@@ -2,7 +2,7 @@
 
 This file introduces :class:`MemoryAttention`, a simple mechanism that
 injects information retrieved from a memory graph into a sequence of hidden
-states.  By default it works with :class:`~memory.store.GraphRetriever`
+states.  By default it works with :class:`~memory.storage.GraphRetriever`
 but it can also consume a
 :class:`~memory.reinforce_retriever.ReinforceRetriever` whose probability
 distribution over nodes defines a soft cross-attention.  The goal is not to

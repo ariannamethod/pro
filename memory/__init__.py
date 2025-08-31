@@ -1,6 +1,14 @@
-"""Memory helpers and retrievers."""
+"""Unified memory package exposing storage, pooling and lattice submodules."""
 
-from .store import MemoryStore, GraphRetriever
+from . import storage, pooling, lattice
+from .storage import MemoryStore, GraphRetriever
 from .reinforce_retriever import ReinforceRetriever
 
-__all__ = ["MemoryStore", "GraphRetriever", "ReinforceRetriever"]
+__all__ = [
+    "storage",
+    "pooling",
+    "lattice",
+    "MemoryStore",
+    "GraphRetriever",
+    "ReinforceRetriever",
+]

@@ -1,7 +1,7 @@
 """Very small chat API integrating the memory graph.
 
 The API is purposely tiny – it merely demonstrates how dialogue turns are
-serialized into :class:`~memory.store.MemoryStore`.  Each call to
+serialized into :class:`~memory.storage.MemoryStore`.  Each call to
 :func:`ChatAPI.process_message` stores the message and returns a numerical
 representation that has been enriched by the :class:`~transformers.modeling_transformer.MemoryAttention`.
 """

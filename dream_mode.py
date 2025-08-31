@@ -1,9 +1,13 @@
+from __future__ import annotations
 """Background dreaming mode generating synthetic dialogues."""
 
 import random
 from typing import List
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from pro_engine import ProEngine
 
-import pro_memory
+from memory import storage as memory_storage
 from trainer import Trainer
 
 _PROMPTS = [
@@ -38,4 +42,4 @@ async def run(engine: "ProEngine", turns: int = 3) -> None:
     trainer = Trainer()
     trainer.evolve("dream", dialogue, metric=1.0)
     for line in dialogue:
-        await pro_memory.add_message(line, tag="dream")
+        await memory_storage.add_message(line, tag="dream")

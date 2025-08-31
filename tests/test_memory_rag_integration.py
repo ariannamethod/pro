@@ -7,7 +7,7 @@ import pytest
 
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 
-import pro_memory  # noqa: E402
+from memory import storage as memory_storage  # noqa: E402
 import pro_rag  # noqa: E402
 import pro_tune  # noqa: E402
 from pro_engine import ProEngine  # noqa: E402
@@ -15,7 +15,7 @@ from pro_engine import ProEngine  # noqa: E402
 
 @pytest.fixture
 def engine(monkeypatch):
-    for path in [pro_memory.DB_PATH, "pro_state.json", "dataset_sha.json"]:
+    for path in [memory_storage.DB_PATH, "pro_state.json", "dataset_sha.json"]:
         if os.path.exists(path):
             os.remove(path)
     monkeypatch.setattr(pro_tune, "train_weighted", lambda *a, **k: None)
@@ -28,9 +28,9 @@ def test_calls_memory_and_rag(engine, monkeypatch):
     add_calls = []
     retrieve_calls = []
     store_calls = []
-    orig_add = pro_memory.add_message
+    orig_add = memory_storage.add_message
     orig_retrieve = pro_rag.retrieve
-    orig_store = pro_memory.store_response
+    orig_store = memory_storage.store_response
 
     async def wrapped_add_message(content):
         add_calls.append(content)
@@ -44,9 +44,9 @@ def test_calls_memory_and_rag(engine, monkeypatch):
         store_calls.append(content)
         await orig_store(content)
 
-    monkeypatch.setattr(pro_memory, "add_message", wrapped_add_message)
+    monkeypatch.setattr(memory_storage, "add_message", wrapped_add_message)
     monkeypatch.setattr(pro_rag, "retrieve", wrapped_retrieve)
-    monkeypatch.setattr(pro_memory, "store_response", wrapped_store_response)
+    monkeypatch.setattr(memory_storage, "store_response", wrapped_store_response)
 
     asyncio.run(engine.process_message("hello world"))
     assert len(add_calls) == 2
@@ -85,8 +85,8 @@ def test_sqlite_connection_open_close(engine, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_retrieve_vectors_and_word_overlap(engine):
-    await pro_memory.add_message("measurement")
-    await pro_memory.add_message("zzyzx")
+    await memory_storage.add_message("measurement")
+    await memory_storage.add_message("zzyzx")
 
     result = await pro_rag.retrieve(["science"])
     assert result == ["measurement"]
@@ -97,13 +97,13 @@ async def test_retrieve_vectors_and_word_overlap(engine):
 
 @pytest.mark.asyncio
 async def test_store_if_novel_skips_duplicates(engine):
-    first = await pro_memory.store_if_novel("repeat twice")
-    second = await pro_memory.store_if_novel("repeat twice")
+    first = await memory_storage.store_if_novel("repeat twice")
+    second = await memory_storage.store_if_novel("repeat twice")
 
     assert first is True
     assert second is False
 
-    messages = await pro_memory.fetch_recent_messages()
+    messages = await memory_storage.fetch_recent_messages()
     assert [m for m, _ in messages].count("repeat twice") == 1
 
     result = await pro_rag.retrieve(["repeat"])

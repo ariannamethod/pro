@@ -8,7 +8,7 @@ from typing import Dict
 from pro_metrics import tokenize, lowercase
 import pro_sequence
 import pro_predict
-import pro_memory
+from memory import storage as memory_storage
 from pro_rag import retrieve_external
 
 STATE_PATH = 'pro_state.json'
@@ -41,7 +41,7 @@ def train_weighted(
     if adapters:
         for name in adapters:
             try:
-                asyncio.run(pro_memory.increment_adapter_usage(name))
+                asyncio.run(memory_storage.increment_adapter_usage(name))
             except Exception:
                 pass
     pro_predict.save_embeddings(pro_predict._GRAPH, pro_predict._VECTORS)

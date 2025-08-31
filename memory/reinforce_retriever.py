@@ -17,7 +17,7 @@ from typing import Optional, Tuple
 import numpy as np
 
 from morphology import encode as encode_morph
-from .store import MemoryStore
+from .storage import MemoryStore
 
 
 class ReinforceRetriever:

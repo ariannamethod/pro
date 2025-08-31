@@ -1,13 +1,12 @@
+from urllib import request, parse
+import asyncio
+import json
+import math
 from typing import Dict, List, Optional
 
-import asyncio
-import math
-import json
-from urllib import request, parse
-
 from pro_metrics import tokenize, lowercase
-import pro_memory
-from memory.store import MemoryStore
+from memory import storage as memory_storage, lattice as memory_lattice
+from memory.storage import MemoryStore
 import pro_predict
 
 
@@ -92,7 +91,7 @@ async def retrieve(
         scored.sort(key=lambda x: x[0], reverse=True)
     else:
         # Fall back to recent messages from the database
-        messages = await pro_memory.fetch_recent_messages(50)
+        messages = await memory_storage.fetch_recent_messages(50)
         qset = set(qwords)
         for msg, _ in messages:
             words = lowercase(tokenize(msg))
@@ -103,7 +102,7 @@ async def retrieve(
                 scored.append((score, msg))
         scored.sort(key=lambda x: x[0], reverse=True)
 
-    graph_context = await pro_memory.fetch_related_concepts(qwords)
+    graph_context = await memory_lattice.fetch_related_concepts(qwords)
     external: List[str] = []
     if external_source:
         external = await retrieve_external(

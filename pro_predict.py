@@ -16,8 +16,8 @@ from transformers.blocks import DynamicContextGate
 from transformers.quantum_dropout import quantum_dropout
 
 from pro_metrics import tokenize, lowercase
-from pro_memory import DB_PATH
-import pro_memory
+from memory.storage import DB_PATH
+from memory import storage as memory_storage
 
 TRANSFORMER_PATH = "pro_transformer.npz"
 
@@ -259,7 +259,7 @@ def lookup_analogs(word: str) -> Optional[str]:
     """Return a known analog for *word* or a suggestion.
 
     The function first checks an in-memory cache populated from the
-    ``synonyms`` table in ``pro_memory.db`` at import time. If no entry is
+    ``synonyms`` table in ``memory_storage.db`` at import time. If no entry is
     found, it falls back to :func:`suggest` and returns the best match if
     available.
     """
@@ -406,7 +406,7 @@ async def update_transformer(
 ) -> None:
     """Train the transformer using recent message/response pairs."""
     if messages is None or responses is None:
-        messages, responses = await pro_memory.fetch_recent(20)
+        messages, responses = await memory_storage.fetch_recent(20)
     if not messages:
         return
     key = tuple(vocab)

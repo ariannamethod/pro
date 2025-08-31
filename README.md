@@ -248,6 +248,26 @@ Unified endpoints accept embeddings and return nearby vectors. External clients 
 
 Planned hooks will connect to DeepSeek models for extended context windows. Sparse kernels promise longer chats while conserving compute.
 
+### Quantum Attention Backend
+
+Provides interchangeable engines for attention, from pure NumPy simulation to Qiskit circuits. Dot-product scores become qubit rotations or classical weights. This design simplifies experiments.
+Flexible backends switch between quantum and classical paths without rewrites.
+
+### Quantum Dropout
+
+Applies random phase rotations then measures real projections to mimic probabilistic dropout. Components vanish based on sampled angles. This method eases later adjustments.
+Measured magnitudes preserve structure while injecting variation.
+
+### Quantum Memory Attention
+
+Blends retrieved memory vectors with quantum amplitudes for enriched focus. Phases strengthen when memories align with keys. It also streamlines future extensions.
+Merged amplitudes recall context while attending to new tokens.
+
+### Resonant Layers
+
+Use shared sinusoidal bases to modulate hidden states with harmonic patterns. Weight updates flow across all frequencies at once. This choice facilitates ongoing refinement.
+Shared resonances keep representations in tune.
+
 ## Telegram Interface
 
 1. Copy `.env.example` to `.env` and replace the placeholder token.

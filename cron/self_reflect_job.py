@@ -20,12 +20,15 @@ INTERVAL_SECONDS = int(os.getenv("SELF_REFLECT_INTERVAL", "86400"))
 
 async def run_cycle(conversations: Optional[List[str]] = None) -> None:
     """Run a single self-reflection cycle."""
-    tuner = (
-        SelfFineTuner(model=torch.device("cpu"))
-        if torch is not None
-        else SelfFineTuner()
-    )
-    tuner.run(conversations or [])
+    if torch is not None:
+        device = torch.device(
+            "cuda" if torch.cuda.is_available() else "cpu"
+        )
+        tuner = SelfFineTuner(model=device)
+    else:
+        tuner = SelfFineTuner()
+
+    await asyncio.to_thread(tuner.run, conversations or [])
 
 
 async def main() -> None:

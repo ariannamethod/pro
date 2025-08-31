@@ -26,15 +26,19 @@ def test_predict_learns_new_words(tmp_path, monkeypatch):
 
     monkeypatch.setattr(pro_rag, "retrieve", dummy_retrieve)
 
-    asyncio.run(engine.setup())
-
     new_word = "zzzzword"
     assert new_word not in pro_predict._VECTORS
     before = pro_predict.suggest(new_word)
+    
+    async def run_message():
+        await engine.setup()
+        await engine.process_message(f"{new_word} music")
+        await engine.shutdown()
 
-    asyncio.run(engine.process_message(f"{new_word} music"))
+    asyncio.run(run_message())
 
     assert new_word in pro_predict._VECTORS
     after = pro_predict.suggest(new_word)
     assert after != before
     assert after
+    assert pro_predict._SAVE_TASK is None

@@ -12,18 +12,14 @@ async def test_execute_cached_ttl(tmp_path):
     db = tmp_path / "cache.db"
     await pro_memory_pool.init_pool(str(db))
     async with pro_memory_pool.get_connection() as conn:
-        await asyncio.to_thread(
-            conn.execute, "INSERT INTO messages(content) VALUES (?)", ("hi",)
-        )
-        await asyncio.to_thread(conn.commit)
+        await conn.execute("INSERT INTO messages(content) VALUES (?)", ("hi",))
+        await conn.commit()
     rows1 = await pro_memory_pool.execute_cached(
         "SELECT content FROM messages", ttl=0.5
     )
     async with pro_memory_pool.get_connection() as conn:
-        await asyncio.to_thread(
-            conn.execute, "INSERT INTO messages(content) VALUES (?)", ("bye",)
-        )
-        await asyncio.to_thread(conn.commit)
+        await conn.execute("INSERT INTO messages(content) VALUES (?)", ("bye",))
+        await conn.commit()
     rows2 = await pro_memory_pool.execute_cached(
         "SELECT content FROM messages", ttl=0.5
     )

@@ -30,24 +30,22 @@ async def persist_embedding(
 ) -> None:
     """Persist a message and its embedding to the database."""
     async with get_connection() as conn:
-        await asyncio.to_thread(
-            conn.execute,
+        await conn.execute(
             'INSERT INTO messages(content, embedding, tag) VALUES (?, ?, ?)',
             (content, embedding.tobytes(), tag),
         )
-        await asyncio.to_thread(conn.commit)
+        await conn.commit()
 
 
 async def persist_learned_vector(index: int, embedding: np.ndarray) -> None:
     """Persist an updated embedding for an existing message."""
 
     async with get_connection() as conn:
-        await asyncio.to_thread(
-            conn.execute,
+        await conn.execute(
             "UPDATE messages SET embedding = ? WHERE rowid = ?",
             (embedding.tobytes(), index + 1),
         )
-        await asyncio.to_thread(conn.commit)
+        await conn.commit()
     if _STORE is not None and index < _STORE.embeddings.shape[0]:
         _STORE.embeddings[index] = embedding
 
@@ -64,10 +62,8 @@ async def build_index() -> None:
     """Load all stored embeddings into the in-memory index."""
     global _STORE
     async with get_connection() as conn:
-        cur = await asyncio.to_thread(
-            conn.execute, 'SELECT content, embedding FROM messages'
-        )
-        rows = await asyncio.to_thread(cur.fetchall)
+        async with conn.execute('SELECT content, embedding FROM messages') as cur:
+            rows = await cur.fetchall()
     if not rows:
         _STORE = None
         return
@@ -87,22 +83,21 @@ async def increment_adapter_usage(name: str) -> None:
     """Increment usage counter for a specific adapter."""
     _ADAPTER_USAGE[name] = _ADAPTER_USAGE.get(name, 0) + 1
     async with get_connection() as conn:
-        await asyncio.to_thread(
-            conn.execute,
+        await conn.execute(
             "INSERT INTO adapter_usage(adapter, count) VALUES (?, 1) "
             "ON CONFLICT(adapter) DO UPDATE SET count = count + 1",
             (name,),
         )
-        await asyncio.to_thread(conn.commit)
+        await conn.commit()
 
 
 async def total_adapter_usage() -> int:
     """Return the total number of adapter usages recorded."""
     async with get_connection() as conn:
-        cur = await asyncio.to_thread(
-            conn.execute, "SELECT SUM(count) FROM adapter_usage"
-        )
-        row = await asyncio.to_thread(cur.fetchone)
+        async with conn.execute(
+            "SELECT SUM(count) FROM adapter_usage"
+        ) as cur:
+            row = await cur.fetchone()
     return int(row[0] or 0)
 
 
@@ -110,8 +105,8 @@ async def reset_adapter_usage() -> None:
     """Clear all adapter usage counters."""
     _ADAPTER_USAGE.clear()
     async with get_connection() as conn:
-        await asyncio.to_thread(conn.execute, "DELETE FROM adapter_usage")
-        await asyncio.to_thread(conn.commit)
+        await conn.execute("DELETE FROM adapter_usage")
+        await conn.commit()
 
 def _close_db_sync() -> None:
     """Synchronously close the database connection pool.
@@ -177,67 +172,61 @@ async def add_concept(description: str) -> None:
         return
     async with get_connection() as conn:
         for ent in entities:
-            await asyncio.to_thread(
-                conn.execute,
+            await conn.execute(
                 'INSERT OR IGNORE INTO concepts(name) VALUES (?)',
                 (ent,),
             )
         for subj, rel, obj in relations:
-            cur = await asyncio.to_thread(
-                conn.execute, 'SELECT id FROM concepts WHERE name = ?', (subj,)
-            )
-            subj_id = await asyncio.to_thread(cur.fetchone)
-            cur = await asyncio.to_thread(
-                conn.execute, 'SELECT id FROM concepts WHERE name = ?', (obj,)
-            )
-            obj_id = await asyncio.to_thread(cur.fetchone)
+            async with conn.execute(
+                'SELECT id FROM concepts WHERE name = ?', (subj,)
+            ) as cur:
+                subj_id = await cur.fetchone()
+            async with conn.execute(
+                'SELECT id FROM concepts WHERE name = ?', (obj,)
+            ) as cur:
+                obj_id = await cur.fetchone()
             if subj_id and obj_id:
-                await asyncio.to_thread(
-                    conn.execute,
+                await conn.execute(
                     'INSERT INTO relations(source, target, relation) VALUES (?, ?, ?)',
                     (subj_id[0], obj_id[0], rel),
                 )
-        await asyncio.to_thread(conn.commit)
+        await conn.commit()
 
 
 async def is_unique(sentence: str) -> bool:
     """Return True if sentence not already stored."""
     async with get_connection() as conn:
-        cur = await asyncio.to_thread(
-            conn.execute,
+        async with conn.execute(
             'SELECT 1 FROM responses WHERE content = ? LIMIT 1',
             (sentence,),
-        )
-        exists = await asyncio.to_thread(cur.fetchone)
+        ) as cur:
+            exists = await cur.fetchone()
     return exists is None
 
 
 async def store_response(sentence: str, tag: Optional[str] = None) -> None:
     """Persist a generated response."""
     async with get_connection() as conn:
-        await asyncio.to_thread(
-            conn.execute,
+        await conn.execute(
             'INSERT INTO responses(content, tag) VALUES (?, ?)',
             (sentence, tag),
         )
-        await asyncio.to_thread(conn.commit)
+        await conn.commit()
 
 
 async def fetch_recent(limit: int = 5) -> Tuple[List[str], List[str]]:
     """Fetch recent messages and responses for context."""
     async with get_connection() as conn:
-        cur = await asyncio.to_thread(
-            conn.execute,
+        async with conn.execute(
             'SELECT content FROM messages ORDER BY id DESC LIMIT ?',
             (limit,),
-        )
-        msg_rows = await asyncio.to_thread(cur.fetchall)
-        cur = await asyncio.to_thread(
-            conn.execute,
+        ) as cur:
+            msg_rows = await cur.fetchall()
+        async with conn.execute(
             'SELECT content FROM responses ORDER BY id DESC LIMIT ?',
             (limit,),
-        )
-        resp_rows = await asyncio.to_thread(cur.fetchall)
+        ) as cur:
+            resp_rows = await cur.fetchall()
     messages = [r[0] for r in msg_rows][::-1]
     responses = [r[0] for r in resp_rows][::-1]
     return messages, responses
@@ -246,12 +235,11 @@ async def fetch_recent(limit: int = 5) -> Tuple[List[str], List[str]]:
 async def fetch_recent_messages(limit: int = 50) -> List[Tuple[str, np.ndarray]]:
     """Fetch recent messages with embeddings."""
     async with get_connection() as conn:
-        cur = await asyncio.to_thread(
-            conn.execute,
+        async with conn.execute(
             'SELECT content, embedding FROM messages ORDER BY id DESC LIMIT ?',
             (limit,),
-        )
-        rows = await asyncio.to_thread(cur.fetchall)
+        ) as cur:
+            rows = await cur.fetchall()
     messages = [
         (r[0], np.frombuffer(r[1], dtype=np.float32)) for r in rows
     ][::-1]
@@ -282,8 +270,7 @@ async def fetch_related_concepts(words: List[str]) -> List[str]:
     terms = [w.lower() for w in words]
     async with get_connection() as conn:
         for term in terms:
-            cur = await asyncio.to_thread(
-                conn.execute,
+            async with conn.execute(
                 (
                     "SELECT c1.name, r.relation, c2.name FROM relations r "
                     "JOIN concepts c1 ON r.source = c1.id "
@@ -291,8 +278,8 @@ async def fetch_related_concepts(words: List[str]) -> List[str]:
                     "WHERE LOWER(c1.name) = ? OR LOWER(c2.name) = ?"
                 ),
                 (term, term),
-            )
-            rows = await asyncio.to_thread(cur.fetchall)
+            ) as cur:
+                rows = await cur.fetchall()
             for s, rel, t in rows:
                 sentence = f"{s} {rel} {t}"
                 if sentence not in seen:

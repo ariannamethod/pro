@@ -29,7 +29,7 @@ _LOCK = threading.RLock()
 _SAVE_TASK: Optional[asyncio.Task] = None
 _FLUSH_TASK: Optional[asyncio.Task] = None
 _INIT_TASK: Optional[asyncio.Task] = None
-FLUSH_INTERVAL = float(os.getenv("SAVE_FLUSH_INTERVAL", "5"))
+_FLUSH_EVENT: Optional[asyncio.Event] = None
 
 
 @contextlib.contextmanager
@@ -180,8 +180,10 @@ async def wait_save_task() -> None:
 
 
 async def _flush_worker() -> None:
+    assert _FLUSH_EVENT is not None
     while True:
-        await asyncio.sleep(FLUSH_INTERVAL)
+        await _FLUSH_EVENT.wait()
+        _FLUSH_EVENT.clear()
         await wait_save_task()
 
 
@@ -192,7 +194,7 @@ async def update(word_list: List[str]) -> None:
     The *word_list* should contain individual tokens. After the update the
     words become part of the internal vocabulary used by :func:`suggest`.
     """
-    global _VECTORS, _SAVE_TASK, _FLUSH_TASK
+    global _VECTORS, _SAVE_TASK, _FLUSH_TASK, _FLUSH_EVENT
     await _ensure_vectors()
     with _vector_lock():
         words = lowercase(word_list)
@@ -204,12 +206,15 @@ async def update(word_list: List[str]) -> None:
                 _GRAPH.setdefault(word, Counter())[other] += 1
                 _GRAPH.setdefault(other, Counter())[word] += 1
         _VECTORS = _build_embeddings(_GRAPH)
-    if _FLUSH_TASK is None:
+    if _FLUSH_EVENT is None:
+        _FLUSH_EVENT = asyncio.Event()
+    if _FLUSH_TASK is None or _FLUSH_TASK.done():
         _FLUSH_TASK = asyncio.create_task(_flush_worker())
     _SAVE_TASK = asyncio.create_task(
         asyncio.to_thread(save_embeddings, _GRAPH, _VECTORS)
     )
     _SAVE_TASK.add_done_callback(_log_save_error)
+    _FLUSH_EVENT.set()
 
 
 TOKENS_QUEUE: Optional[asyncio.Queue[List[str]]] = None
@@ -231,6 +236,7 @@ async def _update_worker() -> None:
             batch.extend(more)
             TOKENS_QUEUE.task_done()
         await update(batch)
+        await wait_save_task()
         batch.clear()
 
 

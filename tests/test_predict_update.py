@@ -33,6 +33,9 @@ def test_predict_learns_new_words(tmp_path, monkeypatch):
     async def run_message():
         await engine.setup()
         await engine.process_message(f"{new_word} music")
+        assert pro_predict.TOKENS_QUEUE is not None
+        await pro_predict.TOKENS_QUEUE.join()
+        assert pro_predict._SAVE_TASK is None
         await engine.shutdown()
 
     asyncio.run(run_message())

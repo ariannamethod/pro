@@ -85,7 +85,6 @@ class MeshNode(asyncio.DatagramProtocol):
     async def leave(self) -> None:
         if self.transport:
             self.transport.close()
-            await asyncio.sleep(0)
         self.peers.clear()
 
     async def health_check(self, host: str, port: int, timeout: float = 1.0) -> bool:
@@ -108,7 +107,6 @@ class MeshNode(asyncio.DatagramProtocol):
         payload = {"type": "gossip", "adapters": self.adapters}
         for peer in list(self.peers):
             self._send(payload, peer)
-        await asyncio.sleep(0)
 
     def _handle_gossip(self, remote: Dict[str, Dict]) -> None:
         for name, data in remote.items():
@@ -160,7 +158,6 @@ async def send_command(
             if peer:
                 payload["peer"] = list(peer)
             transport.sendto(encrypt(payload, key), (target_host, target_port))
-            await asyncio.sleep(0)
             return None
     finally:
         transport.close()

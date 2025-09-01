@@ -17,7 +17,9 @@ async def test_build_index_yields_control(tmp_path, monkeypatch):
 
     emb = np.zeros(3, dtype=np.float32)
     for i in range(5):
-        await pro_memory.persist_embedding(f"msg {i}", emb)
+        content = f"msg {i}"
+        fp = pro_memory._fingerprint(content)
+        await pro_memory.persist_embedding(content, emb, fingerprint=fp)
 
     calls = 0
     real_sleep = asyncio.sleep

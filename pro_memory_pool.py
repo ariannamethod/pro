@@ -25,7 +25,10 @@ async def init_pool(db_path: str, size: int = 1) -> None:
         conn = _POOL[0]
         await conn.execute(
             "CREATE TABLE IF NOT EXISTS messages("  # noqa: E501
-            "id INTEGER PRIMARY KEY AUTOINCREMENT, content TEXT, embedding BLOB, tag TEXT)"
+            "id INTEGER PRIMARY KEY AUTOINCREMENT, content TEXT, embedding BLOB, tag TEXT, fingerprint TEXT)"
+        )
+        await conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_messages_fingerprint ON messages(fingerprint)"
         )
         await conn.execute(
             "CREATE TABLE IF NOT EXISTS responses("  # noqa: E501
@@ -50,6 +53,8 @@ async def init_pool(db_path: str, size: int = 1) -> None:
         for stmt in [
             "ALTER TABLE messages ADD COLUMN embedding BLOB",
             "ALTER TABLE messages ADD COLUMN tag TEXT",
+            "ALTER TABLE messages ADD COLUMN fingerprint TEXT",
+            "CREATE INDEX IF NOT EXISTS idx_messages_fingerprint ON messages(fingerprint)",
             "ALTER TABLE responses ADD COLUMN tag TEXT",
         ]:
             try:

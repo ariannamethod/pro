@@ -2,8 +2,10 @@ import asyncio
 import atexit
 from typing import Dict, List, Tuple, Optional
 
+import hashlib
 import numpy as np
 import re
+import morphology
 import pro_rag_embedding
 from pro_memory_pool import init_pool, close_pool, get_connection
 from memory import MemoryStore
@@ -19,6 +21,13 @@ _ADAPTER_USAGE: Dict[str, int] = {}
 COMPRESSION_INTERVAL = 100
 COMPRESSION_EVENT = asyncio.Event()
 _TOTAL_ADAPTER_USAGE = 0
+
+
+def _fingerprint(content: str) -> str:
+    """Return a stable hash of the morphological tokens in ``content``."""
+    tokens = morphology.tokenize(content)
+    joined = " ".join(tokens)
+    return hashlib.md5(joined.encode("utf-8")).hexdigest()
 
 
 def _is_short(content: str) -> bool:
@@ -41,13 +50,16 @@ async def encode_message(content: str) -> np.ndarray:
 
 
 async def persist_embedding(
-    content: str, embedding: np.ndarray, tag: Optional[str] = None
+    content: str,
+    embedding: np.ndarray,
+    tag: Optional[str] = None,
+    fingerprint: Optional[str] = None,
 ) -> None:
-    """Persist a message and its embedding to the database."""
+    """Persist a message, its embedding and fingerprint to the database."""
     async with get_connection() as conn:
         await conn.execute(
-            'INSERT INTO messages(content, embedding, tag) VALUES (?, ?, ?)',
-            (content, embedding.tobytes(), tag),
+            'INSERT INTO messages(content, embedding, tag, fingerprint) VALUES (?, ?, ?, ?)',
+            (content, embedding.tobytes(), tag, fingerprint),
         )
         await conn.commit()
 
@@ -176,7 +188,8 @@ atexit.register(_close_db_sync)
 async def add_message(content: str, tag: Optional[str] = None) -> None:
     """Encode a message, persist it, and update the search index."""
     embedding = await encode_message(content)
-    await persist_embedding(content, embedding, tag)
+    fingerprint = _fingerprint(content)
+    await persist_embedding(content, embedding, tag, fingerprint)
     _add_to_index(content, embedding)
 
 
@@ -199,6 +212,14 @@ async def store_if_novel(
     content = content.strip()
     if _is_short(content) or _is_blacklisted(content):
         return False
+    fingerprint = _fingerprint(content)
+    async with get_connection() as conn:
+        async with conn.execute(
+            'SELECT 1 FROM messages WHERE fingerprint = ? LIMIT 1',
+            (fingerprint,),
+        ) as cur:
+            if await cur.fetchone():
+                return False
 
     if _STORE is None or _STORE.embeddings.shape[0] == 0:
         await build_index()
@@ -209,7 +230,7 @@ async def store_if_novel(
         if distances.size and float(distances.min()) < threshold:
             return False
 
-    await persist_embedding(content, embedding, tag)
+    await persist_embedding(content, embedding, tag, fingerprint)
     _add_to_index(content, embedding)
     return True
 

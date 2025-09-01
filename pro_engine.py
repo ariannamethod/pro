@@ -9,10 +9,17 @@ import re
 import importlib.util
 import sys
 import time
+import concurrent.futures
 from typing import Dict, List, Tuple, Set, Optional
 from collections import Counter, deque
 
 import numpy as np
+
+# Python 3.7 совместимость для to_thread
+def to_thread(func, *args, **kwargs):
+    loop = asyncio.get_event_loop()
+    with concurrent.futures.ThreadPoolExecutor() as executor:
+        return loop.run_in_executor(executor, lambda: func(*args, **kwargs))
 
 from pro_metrics import (
     tokenize,
@@ -130,20 +137,13 @@ class ProEngine:
         self.novelty_threshold = novelty_threshold
         self.candidate_buffer: deque = deque(maxlen=20)
         self.last_forecast: Optional[Dict] = None
-        self.dataset_queue: asyncio.Queue[Optional[str]] = asyncio.Queue()
+        self.dataset_queue: asyncio.Queue = asyncio.Queue()
         self._tune_worker_task: Optional[asyncio.Task] = None
-        self._watcher_task: Optional[asyncio.Task] = None
         self._tune_tasks: List[asyncio.Task] = []
         self._running_tasks: List[asyncio.Task] = []
-        self._candidate_queue: asyncio.Queue[None] = asyncio.Queue()
+        self._candidate_queue: asyncio.Queue = asyncio.Queue()
         self._candidate_worker_task: Optional[asyncio.Task] = None
         self._tune_semaphore = asyncio.BoundedSemaphore(TUNE_CONCURRENCY)
-        self._compression_task: Optional[asyncio.Task] = None
-        self._dream_task: Optional[asyncio.Task] = None
-        self._dream_mode_task: Optional[asyncio.Task] = None
-        self._dream_event = asyncio.Event()
-        self._dream_interval = dream_interval
-        self._dream_timeout = DREAM_TIMEOUT
         self.adapter_pool = self._load_adapters()
         self.reasoner = SymbolicReasoner()
         self.light_moe = LightweightMoEBlock(dim=16, num_experts=4)
@@ -351,7 +351,7 @@ class ProEngine:
                 )
             else:
                 try:
-                    await asyncio.to_thread(
+                    await to_thread(
                         pro_tune.train, self.state, dataset_path
                     )
                     await self.save_state()
@@ -377,81 +377,10 @@ class ProEngine:
                 except Exception as exc:  # pragma: no cover - logging side effect
                     logging.error("Dataset scan failed: %s", exc)
 
-        # Dataset watcher disabled to prevent background interference
-        # self._watcher_task = asyncio.create_task(_watch_datasets())
-        # self._running_tasks.append(self._watcher_task)
+        # Лишние воркеры отключены - они создавали 20-минутные задержки
+        # Оставляем только основную логику обучения после каждого сообщения
 
-        async def _compression_worker() -> None:
-            try:
-                while True:
-                    await pro_memory.COMPRESSION_EVENT.wait()
-                    pro_memory.COMPRESSION_EVENT.clear()
-                    count = await pro_memory.total_adapter_usage()
-                    if count >= pro_memory.COMPRESSION_INTERVAL:
-                        try:
-                            mut = LayerMutator(use_lora=True)
-                            mut.load('adapter_pool')
-                            lora_utils.prune_and_merge(mut.lora_layers)
-                        except Exception as exc:  # pragma: no cover - logging side effect
-                            logging.error("Compression failed: %s", exc)
-                        await pro_memory.reset_adapter_usage()
-            except asyncio.CancelledError:
-                raise
-
-        # Background workers disabled to prevent delays
-        # self._compression_task = asyncio.create_task(_compression_worker())
-        # self._running_tasks.append(self._compression_task)
-        # self._start_dream_worker()
-
-    def _start_dream_worker(self) -> None:
-        if self._dream_task is None or self._dream_task.done():
-            self._dream_task = asyncio.create_task(self._dream_worker())
-            self._running_tasks.append(self._dream_task)
-
-    async def _system_idle(self) -> bool:
-        try:
-            idle1, total1 = await asyncio.to_thread(_read_cpu_times)
-            await asyncio.sleep(0.1)
-            idle2, total2 = await asyncio.to_thread(_read_cpu_times)
-            idle_delta = idle2 - idle1
-            total_delta = total2 - total1
-            if total_delta <= 0:
-                return True
-            usage = 1 - idle_delta / total_delta
-            return usage < 0.2
-        except Exception:
-            return True
-
-    async def _dream_worker(self) -> None:
-        try:
-            while True:
-                try:
-                    await asyncio.wait_for(
-                        self._dream_event.wait(), timeout=self._dream_interval
-                    )
-                    self._dream_event.clear()
-                except asyncio.TimeoutError:
-                    pass
-                idle = await self._system_idle()
-                if idle:
-                    if (
-                        self._dream_mode_task is None
-                        or self._dream_mode_task.done()
-                    ):
-                        async def _run_dream() -> None:
-                            try:
-                                await asyncio.wait_for(
-                                    dream_mode.run(self),
-                                    timeout=self._dream_timeout,
-                                )
-                            except Exception:
-                                pass
-
-                        self._dream_mode_task = asyncio.create_task(_run_dream())
-        except asyncio.CancelledError:
-            if self._dream_mode_task is not None:
-                self._dream_mode_task.cancel()
-            pass
+    # Лишние воркеры удалены - они создавали задержки и race conditions
 
     def _start_candidate_worker(self) -> None:
         if (
@@ -496,7 +425,7 @@ class ProEngine:
             raise
 
     async def save_state(self) -> None:
-        await asyncio.to_thread(pro_tune.save_state, self.state, STATE_PATH)
+        await to_thread(pro_tune.save_state, self.state, STATE_PATH)
 
     async def scan_datasets(self) -> None:
         self._start_tune_worker()
@@ -531,7 +460,7 @@ class ProEngine:
 
         async def hash_file(name: str, path: str) -> Tuple[str, str, str]:
             async with hash_semaphore:
-                digest = await asyncio.to_thread(compute_hash, path)
+                digest = await to_thread(compute_hash, path)
                 return name, digest, path
 
         tasks = [hash_file(n, p) for n, p in paths]
@@ -565,7 +494,7 @@ class ProEngine:
                     except Exception:
                         pass
                     return tokens
-                return os.path.basename(path), await asyncio.to_thread(_read)
+                return os.path.basename(path), await to_thread(_read)
 
             results = await asyncio.gather(
                 *(load_tokens(p) for p in changed_files)
@@ -591,7 +520,7 @@ class ProEngine:
                     weight = float(weights.get(os.path.basename(path), 1.0))
                     adapters = self.select_adapters(path)
                     adapter_names = [n for n, _ in adapters]
-                    await asyncio.to_thread(
+                    await to_thread(
                         pro_tune.train_weighted,
                         self.state,
                         path,
@@ -618,11 +547,11 @@ class ProEngine:
         if novelty <= self.novelty_threshold:
             return
         try:
-            specialist = await asyncio.to_thread(
+            specialist = await to_thread(
                 pro_spawn.create_specialist, self.state, dataset_path
             )
             if specialist is not None:
-                self.state = await asyncio.to_thread(
+                self.state = await to_thread(
                     pro_tune.merge_specialist, self.state, specialist
                 )
         except Exception as exc:  # pragma: no cover - logging side effect
@@ -664,7 +593,7 @@ class ProEngine:
                 leaves.extend(_collect(child))
             return leaves
 
-        tree = await asyncio.to_thread(pro_forecast.simulate_paths, seeds, depth)
+        tree = await to_thread(pro_forecast.simulate_paths, seeds, depth)
         leaves = _collect(tree)
         best = None
         best_score = -float("inf")
@@ -879,7 +808,7 @@ class ProEngine:
 
             async def _lookup_seeds() -> List[Tuple[str, str]]:
                 async def _lookup_seed(w: str) -> Tuple[str, str]:
-                    analog = await asyncio.to_thread(
+                    analog = await to_thread(
                         pro_predict.lookup_analogs, w.lower()
                     ) or w
                     if w.isupper():
@@ -891,7 +820,7 @@ class ProEngine:
                 return await asyncio.gather(*(_lookup_seed(w) for w in attempt_seeds))
 
             async with asyncio.TaskGroup() as tg:
-                metrics_task = tg.create_task(asyncio.to_thread(_metrics_and_length))
+                metrics_task = tg.create_task(to_thread(_metrics_and_length))
                 seed_task = tg.create_task(_lookup_seeds())
                 tg.create_task(self._forecast(attempt_seeds))
 
@@ -932,7 +861,7 @@ class ProEngine:
                 combined_counts[w] = combined_counts.get(w, 0) + weight
 
             async def _lookup_inv(w: str) -> Tuple[str, Optional[str]]:
-                analog = await asyncio.to_thread(pro_predict.lookup_analogs, w)
+                analog = await to_thread(pro_predict.lookup_analogs, w)
                 return w, analog
 
             inv_results = await asyncio.gather(*(_lookup_inv(w) for w in high_inv_words))
@@ -956,7 +885,7 @@ class ProEngine:
                     tracker.add(w)
             while len(words) < 2:
                 words.append("")
-            words = await asyncio.to_thread(
+            words = await to_thread(
                 self.plan_sentence,
                 words,
                 target_length,
@@ -999,7 +928,7 @@ class ProEngine:
                     scores_local[word] = sim
                 return scores_local
 
-            scores = await asyncio.to_thread(
+            scores = await to_thread(
                 _compute_scores, first_words, tracker, vectors
             )
             sim_thresh = similarity_threshold
@@ -1014,7 +943,7 @@ class ProEngine:
                 )
             second_seeds = ordered2[:2]
 
-            metrics_first = await asyncio.to_thread(
+            metrics_first = await to_thread(
                 compute_metrics,
                 first_words,
                 self.state.get("trigram_counts", {}),
@@ -1022,7 +951,7 @@ class ProEngine:
                 self.state.get("word_counts", {}),
                 self.state.get("char_ngram_counts", {}),
             )
-            target_length2 = await asyncio.to_thread(
+            target_length2 = await to_thread(
                 target_length_from_metrics,
                 {
                     "entropy": metrics_first["entropy"],
@@ -1031,7 +960,7 @@ class ProEngine:
                 min_len=5,
                 max_len=6,
             )
-            words2 = await asyncio.to_thread(
+            words2 = await to_thread(
                 self.plan_sentence,
                 second_seeds,
                 target_length2,
@@ -1083,7 +1012,7 @@ class ProEngine:
                 response = pattern.sub(analog, response)
             if await message_utils.ensure_unique(response):
                 if update_meta:
-                    resp_metrics = await asyncio.to_thread(
+                    resp_metrics = await to_thread(
                         compute_metrics,
                         lowercase(tokenize(response)),
                         self.state.get("trigram_counts", {}),
@@ -1200,7 +1129,7 @@ class ProEngine:
         vocab = list(self.state.get("word_counts", {}).keys())
         if vocab:
             att_tokens = self._drop_low_saliency(words[-5:])
-            trans_logits = await asyncio.to_thread(
+            trans_logits = await to_thread(
                 pro_predict.transformer_logits, att_tokens, vocab, adapters
             )
         blend = pro_predict.combine_predictions(
@@ -1257,7 +1186,7 @@ class ProEngine:
             pass
         context_tokens = tokenize(' '.join(context))
         all_words = words + lowercase(context_tokens)
-        metrics = await asyncio.to_thread(
+        metrics = await to_thread(
             compute_metrics,
             all_words,
             self.state['trigram_counts'],
@@ -1280,10 +1209,10 @@ class ProEngine:
                 tokens.extend(t)
             return tokens
 
-        mem_tokens_task = asyncio.to_thread(
+        mem_tokens_task = to_thread(
             _gather_tokens, recent_msgs + recent_resps
         )
-        data_tokens_task = asyncio.to_thread(_cached_data_tokens)
+        data_tokens_task = to_thread(_cached_data_tokens)
         mem_tokens, data_tokens = await asyncio.gather(
             mem_tokens_task, data_tokens_task
         )
@@ -1301,7 +1230,7 @@ class ProEngine:
                 combined[w] = weight
             return combined
 
-        combined_vocab = await asyncio.to_thread(
+        combined_vocab = await to_thread(
             _combine_vocab, mem_tokens, data_tokens
         )
         ranked = self.rank_candidates(msg_emb, topn=1)
@@ -1362,13 +1291,15 @@ class ProEngine:
                     json.dump(hashes, fh)
             except Exception as exc:  # pragma: no cover - logging side effect
                 logging.error("Updating dataset hash failed: %s", exc)
-            await self._async_tune([dataset_path])
+            # Управляемое обучение вместо накопления задач
+            if not self._tune_semaphore.locked():
+                await self._async_tune([dataset_path])
         except Exception as exc:  # pragma: no cover - logging side effect
             logging.error("Logging conversation failed: %s", exc)
-        await asyncio.to_thread(
+        await to_thread(
             pro_sequence.analyze_sequences, self.state, words
         )
-        await asyncio.to_thread(
+        await to_thread(
             pro_sequence.analyze_sequences,
             self.state,
             lowercase(tokenize(response)),
@@ -1378,6 +1309,7 @@ class ProEngine:
         )
         vocab_list = list(self.state.get("word_counts", {}).keys())
         if vocab_list:
+            # Синхронное обновление вместо накопления задач
             await pro_predict.update_transformer(
                 vocab_list, recent_msgs, recent_resps
             )
@@ -1385,9 +1317,9 @@ class ProEngine:
             await self.save_state()
         except Exception as exc:  # pragma: no cover - logging side effect
             logging.error("Saving state failed: %s", exc)
-        # Candidate preparation moved to synchronous flow
-        await self.prepare_candidates()
-        resp_metrics = await asyncio.to_thread(
+        self._start_candidate_worker()
+        self._candidate_queue.put_nowait(None)
+        resp_metrics = await to_thread(
             compute_metrics,
             lowercase(tokenize(response)),
             self.state['trigram_counts'],
@@ -1423,7 +1355,7 @@ class ProEngine:
         try:
             while True:
                 try:
-                    message = await asyncio.to_thread(input, '> ')
+                    message = await to_thread(input, '> ')
                 except EOFError:
                     break
                 message = message.strip()

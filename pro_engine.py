@@ -1108,7 +1108,25 @@ class ProEngine:
             score = float(np.dot(msg_emb, emb)) - template_penalty(resp, counts)
             scored.append((score, emb, resp))
         scored.sort(key=lambda x: x[0], reverse=True)
-        return scored[:topn]
+
+        def _cos_sim(a: np.ndarray, b: np.ndarray) -> float:
+            denom = np.linalg.norm(a) * np.linalg.norm(b)
+            if denom == 0:
+                return 0.0
+            return float(np.dot(a, b) / denom)
+
+        deduped: List[Tuple[float, np.ndarray, str]] = []
+        for score, emb, resp in scored:
+            is_dup = False
+            for _, e2, r2 in deduped:
+                if resp == r2 or _cos_sim(emb, e2) > 0.98:
+                    is_dup = True
+                    break
+            if not is_dup:
+                deduped.append((score, emb, resp))
+            if len(deduped) == topn:
+                break
+        return deduped
 
     @timed
     async def process_message(self, message: str) -> Tuple[str, Dict]:

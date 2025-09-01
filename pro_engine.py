@@ -33,6 +33,7 @@ import lora_utils
 from autoadapt import LayerMutator
 from pro_identity import swap_pronouns
 import grammar_filters
+import message_utils
 from watchfiles import awatch
 from transformers.blocks import SymbolicReasoner, LightweightMoEBlock
 from meta_controller import MetaController
@@ -815,19 +816,7 @@ class ProEngine:
             else similarity_threshold
         )
         forbidden = {w.lower() for w in (forbidden or set())}
-        analog_map: Dict[str, str] = {}
-        analog_lock = asyncio.Lock()
-
-        async def _build_analog(tok: str) -> None:
-            suggestions = await pro_predict.suggest_async(tok, topn=1)
-            analog = suggestions[0] if suggestions else None
-            if not analog:
-                analog = await asyncio.to_thread(pro_predict.lookup_analogs, tok)
-            if analog:
-                async with analog_lock:
-                    analog_map[tok] = analog
-
-        await asyncio.gather(*(_build_analog(tok) for tok in forbidden))
+        analog_map = await message_utils.build_analog_map(forbidden)
         ordered_vocab: List[str] = []
         seen_vocab: Set[str] = set()
         for w, _ in sorted(vocab.items(), key=lambda x: x[1], reverse=True):
@@ -1059,11 +1048,7 @@ class ProEngine:
             for tok, analog in analog_map.items():
                 pattern = re.compile(rf"\b{re.escape(tok)}\b", re.IGNORECASE)
                 response = pattern.sub(analog, response)
-            if (
-                grammar_filters.passes_filters(response)
-                and await pro_memory.is_unique(response)
-            ):
-                await pro_memory.store_response(response)
+            if await message_utils.ensure_unique(response):
                 if update_meta:
                     resp_metrics = await asyncio.to_thread(
                         compute_metrics,
@@ -1292,6 +1277,7 @@ class ProEngine:
         for tmpl in COMMON_TEMPLATES:
             if tmpl in response:
                 counts[tmpl] = counts.get(tmpl, 0) + 1
+        await message_utils.ensure_unique(response)
         try:
             await pro_memory.add_message(response)
             try:

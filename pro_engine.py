@@ -15,11 +15,7 @@ from collections import Counter, deque
 
 import numpy as np
 
-# Python 3.7 совместимость для to_thread
-def to_thread(func, *args, **kwargs):
-    loop = asyncio.get_event_loop()
-    with concurrent.futures.ThreadPoolExecutor() as executor:
-        return loop.run_in_executor(executor, lambda: func(*args, **kwargs))
+from compat import to_thread
 
 from pro_metrics import (
     tokenize,
@@ -137,44 +133,9 @@ class ProEngine:
         self.ngram_weight = ngram_weight
         self.transformer_weight = transformer_weight
 
-    def _load_adapters(self) -> Dict[str, Dict]:
-        pool: Dict[str, Dict] = {}
-        base = "adapter_pool"
-        if not os.path.isdir(base):
-            return pool
-        for name in os.listdir(base):
-            cfg_path = os.path.join(base, name, "config.json")
-            if not os.path.isfile(cfg_path):
-                continue
-            try:
-                with open(cfg_path, "r", encoding="utf-8") as fh:
-                    cfg = json.load(fh)
-                weights_file = cfg.get("weights_path", "weights.json")
-                wpath = os.path.join(base, name, weights_file)
-                weights: Dict[str, float] = {}
-                if os.path.isfile(wpath):
-                    with open(wpath, "r", encoding="utf-8") as fh:
-                        weights = json.load(fh)
-                pool[name] = {"config": cfg, "weights": weights}
-            except Exception:
-                continue
-        return pool
+    # _load_adapters удален
 
-    def select_adapters(
-        self, prompt: str, top_k: int = 1
-    ) -> List[Tuple[str, Dict[str, float]]]:
-        tokens = lowercase(tokenize(prompt))
-        scores: List[Tuple[int, str]] = []
-        for name, data in self.adapter_pool.items():
-            keywords = data.get("config", {}).get("keywords", [])
-            score = sum(tokens.count(k) for k in keywords)
-            if score:
-                scores.append((score, name))
-        scores.sort(reverse=True)
-        return [
-            (n, self.adapter_pool[n]["weights"])
-            for _, n in scores[:top_k]
-        ]
+    # select_adapters удален
 
     # Lightweight MoE -----------------------------------------------------
 
@@ -484,7 +445,7 @@ class ProEngine:
             async with self._tune_semaphore:
                 try:
                     weight = float(weights.get(os.path.basename(path), 1.0))
-                    adapters = self.select_adapters(path)
+                    # Адаптеры удалены
                     adapter_names = [n for n, _ in adapters]
                     await to_thread(
                         pro_tune.train_weighted,
@@ -758,7 +719,14 @@ class ProEngine:
                 repl = repl[0].upper() + repl[1:]
             attempt_seeds.append(repl)
         extra_idx = 0
+        max_attempts = 10  # Принудительный выход из цикла
+        attempts = 0
         while True:
+            attempts += 1
+            if attempts > max_attempts:
+                # Принудительный выход - берем что есть
+                response = " ".join(filter(None, attempt_seeds[:2])) + ". " + " ".join(filter(None, attempt_seeds[2:4])) + "."
+                return response
             def _metrics_and_length() -> Tuple[Dict, int]:
                 tokens = [w.lower() for w in attempt_seeds if w]
                 metrics_local = compute_metrics(
@@ -783,13 +751,14 @@ class ProEngine:
 
                 return await asyncio.gather(*(_lookup_seed(w) for w in attempt_seeds))
 
-            async with asyncio.TaskGroup() as tg:
-                metrics_task = tg.create_task(to_thread(_metrics_and_length))
-                seed_task = tg.create_task(_lookup_seeds())
-                tg.create_task(self._forecast(attempt_seeds))
-
-            metrics, target_length = metrics_task.result()
-            seed_results = seed_task.result()
+            # TaskGroup заменен на простой gather
+            metrics_task = to_thread(_metrics_and_length)
+            seed_task = _lookup_seeds()
+            forecast_task = self._forecast(attempt_seeds)
+            
+            results = await asyncio.gather(metrics_task, seed_task, forecast_task)
+            metrics, target_length = results[0]
+            seed_results = results[1]
             bigram_inv = self.state.get("bigram_inv", {})
             trigram_inv = self.state.get("trigram_inv", {})
             inv_scores: Dict[str, float] = {}
@@ -1060,8 +1029,7 @@ class ProEngine:
         )
         original_words = tokenize(message)
         words = lowercase(original_words)
-        adapter_pairs = self.select_adapters(message)
-        adapters = [w for _, w in adapter_pairs]
+        # Адаптеры удалены
         words = swap_pronouns(words)
         user_forbidden = set(words)
         async def _time(name: str, coro):
@@ -1093,7 +1061,7 @@ class ProEngine:
         if vocab:
             att_tokens = self._drop_low_saliency(words[-5:])
             trans_logits = await to_thread(
-                pro_predict.transformer_logits, att_tokens, vocab, adapters
+                pro_predict.transformer_logits, att_tokens, vocab, None
             )
         blend = pro_predict.combine_predictions(
             ngram_pred,
@@ -1120,22 +1088,11 @@ class ProEngine:
             logging.error("Context retrieval failed: %s", context)
             context = []
         ext_hits: List[str] = []
-        if mem_emb is not None:
-            try:
-                ext_hits = await _time(
-                    "vector_query", vector_store.query(mem_emb.tolist(), top_k=5)
-                )
-            except Exception as exc:  # pragma: no cover - logging side effect
-                logging.error("External store query failed: %s", exc)
+        # vector_store query удален
         memory_context.extend(ext_hits)
         store_tasks = []
         store_tasks.append(_time("memory_add", pro_memory.add_message(message)))
-        if mem_emb is not None:
-            store_tasks.append(
-                _time(
-                    "vector_upsert", vector_store.upsert(message, mem_emb.tolist())
-                )
-            )
+        # vector_store tasks удалены
         store_results = await asyncio.gather(*store_tasks, return_exceptions=True)
         for res in store_results:
             if isinstance(res, Exception):
@@ -1168,8 +1125,8 @@ class ProEngine:
 
         def _cached_data_tokens() -> List[str]:
             tokens: List[str] = []
-            for t in self._dataset_tokens.values():
-                tokens.extend(t)
+            # _dataset_tokens удален - возвращаем пустой список
+            pass
             return tokens
 
         mem_tokens_task = to_thread(
@@ -1227,7 +1184,7 @@ class ProEngine:
             await pro_memory.add_message(response)
             try:
                 emb = await pro_memory.encode_message(response)
-                await vector_store.upsert(response, emb.tolist())
+                # vector_store upsert удален
             except Exception as exc:  # pragma: no cover - logging side effect
                 logging.error("External store upsert failed: %s", exc)
         except Exception as exc:  # pragma: no cover - logging side effect

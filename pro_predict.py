@@ -401,7 +401,7 @@ class MiniSelfAttention:
             w_k=self.w_k,
             w_v=self.w_v,
             w_o=self.w_o,
-            gate_bias=self.gate.bias if self.gate else np.zeros(self.dim),
+            gate_bias=np.zeros(self.dim),  # gate удален
         )
 
     def train_step(

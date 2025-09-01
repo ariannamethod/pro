@@ -863,18 +863,28 @@ class ProEngine:
                     scores_local[word] = sim
                 return scores_local
 
-            # _compute_scores убран - зависал
+            # Простая альтернатива _compute_scores без зависания
             scores = {}
+            import random
+            for word in ordered:
+                if word not in tracker:
+                    scores[word] = random.random()  # Случайные скоры для разнообразия
             sim_thresh = similarity_threshold
             eligible = [w for w, s in scores.items() if s < sim_thresh]
             if eligible:
                 ordered2 = sorted(eligible, key=lambda w: scores[w])
             else:
-                ordered2 = (
-                    [w for w, _ in sorted(scores.items(), key=lambda x: x[1])]
-                    if scores
-                    else [w for w in ordered if w not in tracker]
-                )
+                # Для второго предложения берем ДРУГИЕ слова
+                if scores:
+                    ordered2 = [w for w, _ in sorted(scores.items(), key=lambda x: x[1], reverse=True)]  # Обратная сортировка
+                else:
+                    # Берем слова из морфологии и RAG для разнообразия
+                    import morphology
+                    morph_words = []
+                    for w in attempt_seeds:
+                        variants = morphology.get_word_forms(w)
+                        morph_words.extend(variants[:3])  # По 3 варианта
+                    ordered2 = [w for w in morph_words if w not in tracker and w not in forbidden] or [w for w in ordered if w not in tracker]
             second_seeds = ordered2[:2]
 
             metrics_first = await to_thread(

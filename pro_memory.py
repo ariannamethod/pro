@@ -163,3 +163,10 @@ def get_memory_stats() -> dict:
         "total_messages": len(_MESSAGES),
         "recent_count": min(10, len(_MESSAGES))
     }
+
+
+async def add_message(content: str, tag: str = "message") -> None:
+    """Add message to memory."""
+    embedding = await encode_message(content)
+    await persist_embedding(content, embedding, tag)
+    _add_to_graph(content, "message", tag, embedding)

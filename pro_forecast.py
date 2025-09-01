@@ -79,7 +79,7 @@ def backpropagate_forecast(node: ForecastNode) -> None:
     if len(tokens) > 1 and node.novelty > 0:
         context, target = tokens[:-1], tokens[-1]
         lr = 0.1 * node.novelty
-        model.train_step(context, target, lr=lr)
+        model.train_step([context], [target], lr=lr)
 
     for child in node.children:
         backpropagate_forecast(child)

@@ -5,7 +5,7 @@ import threading
 import pickle
 import logging
 from collections import Counter, defaultdict
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 import math
 import difflib
 import numpy as np
@@ -343,7 +343,15 @@ class MiniSelfAttention:
     """A tiny self-attention module for next-word prediction."""
 
     def __init__(
-        self, vocab: List[str], dim: int = 32, use_gate: bool = True
+        self,
+        vocab: List[str],
+        dim: int = 32,
+        use_gate: bool = True,
+        lr: float = 0.1,
+        l2: float = 0.0,
+        temperature: float = 1.0,
+        clip_norm: float = 1.0,
+        repeat_penalty: float = 1.0,
     ) -> None:
         self.vocab = vocab
         self.dim = dim
@@ -355,6 +363,11 @@ class MiniSelfAttention:
         self.w_o = rng.standard_normal((dim, len(vocab)))
         self.use_gate = use_gate
         self.gate = DynamicContextGate(dim) if use_gate else None
+        self.lr = lr
+        self.l2 = l2
+        self.temperature = temperature
+        self.clip_norm = clip_norm
+        self.repeat_penalty = repeat_penalty
         if os.path.exists(TRANSFORMER_PATH):
             try:
                 data = np.load(TRANSFORMER_PATH, allow_pickle=True)
@@ -383,31 +396,62 @@ class MiniSelfAttention:
         )
 
     def train_step(
-        self, tokens: List[str], target: str, lr: float = 0.1
+        self,
+        tokens_batch: List[List[str]],
+        targets: List[str],
+        lr: float | None = None,
     ) -> None:
-        ids = [self.vocab.index(t) for t in tokens if t in self.vocab]
-        if not ids or target not in self.vocab:
+        if lr is not None:
+            self.lr = lr
+        batch_ids = [
+            [self.vocab.index(t) for t in tokens if t in self.vocab]
+            for tokens in tokens_batch
+        ]
+        valid = [ids and target in self.vocab for ids, target in zip(batch_ids, targets)]
+        if not any(valid):
             return
-        x = self.emb[ids]
+        max_len = max(len(ids) for ids, v in zip(batch_ids, valid) if v)
+        batch_size = len(tokens_batch)
+        ids_arr = -np.ones((batch_size, max_len), dtype=int)
+        mask = np.zeros((batch_size, max_len), dtype=bool)
+        for i, ids in enumerate(batch_ids):
+            if not ids:
+                continue
+            ids_arr[i, : len(ids)] = ids
+            mask[i, : len(ids)] = True
+        x = self.emb[ids_arr.clip(min=0)]
+        x[~mask] = 0
         q = x @ self.w_q
         k = x @ self.w_k
         v = x @ self.w_v
         scale = np.sqrt(self.dim)
-        att = q @ k.T / scale
-        att = np.exp(att - att.max(axis=-1, keepdims=True))
-        att = att / att.sum(axis=-1, keepdims=True)
+        att = q @ np.swapaxes(k, 1, 2) / scale
+        att = np.where(mask[:, :, None] & mask[:, None, :], att, -np.inf)
+        att = np.exp(att - np.max(att, axis=-1, keepdims=True))
+        att_sum = att.sum(axis=-1, keepdims=True)
+        att = np.divide(att, att_sum, where=att_sum != 0)
         context = att @ v
         context = quantum_dropout(context)
         if self.gate:
-            context = self.gate(context)
-        pooled = context.mean(axis=0)
+            context = np.stack([self.gate(c) for c in context])
+        context = (context - context.mean(axis=-1, keepdims=True)) / (
+            context.std(axis=-1, keepdims=True) + 1e-5
+        )
+        pooled = context.mean(axis=1)
         out = pooled @ self.w_o
-        exp_out = np.exp(out - out.max())
-        probs = exp_out / exp_out.sum()
-        y = np.zeros(len(self.vocab))
-        y[self.vocab.index(target)] = 1.0
+        out /= self.temperature
+        exp_out = np.exp(out - np.max(out, axis=1, keepdims=True))
+        probs = exp_out / exp_out.sum(axis=1, keepdims=True)
+        y = np.zeros_like(probs)
+        for i, target in enumerate(targets):
+            if valid[i]:
+                y[i, self.vocab.index(target)] = 1.0
         grad = probs - y
-        self.w_o -= lr * np.outer(pooled, grad)
+        grad_w_o = pooled.T @ grad / batch_size + self.l2 * self.w_o
+        norm = np.linalg.norm(grad_w_o)
+        if norm > self.clip_norm:
+            grad_w_o *= self.clip_norm / (norm + 1e-6)
+        self.w_o -= self.lr * grad_w_o
 
     def logits(
         self,
@@ -429,9 +473,21 @@ class MiniSelfAttention:
         context = quantum_dropout(context)
         if self.gate:
             context = self.gate(context)
+        context = (context - context.mean(axis=-1, keepdims=True)) / (
+            context.std(axis=-1, keepdims=True) + 1e-5
+        )
         pooled = context.mean(axis=0)
         out = pooled @ self.w_o
-        logits = {self.vocab[i]: float(out[i]) for i in range(len(self.vocab))}
+        counts = {}
+        for t in tokens:
+            counts[t] = counts.get(t, 0) + 1
+        for token, c in counts.items():
+            if c > 1 and token in self.vocab:
+                out[self.vocab.index(token)] -= self.repeat_penalty * (c - 1)
+        out /= self.temperature
+        exp_out = np.exp(out - out.max())
+        probs = exp_out / exp_out.sum()
+        logits = {self.vocab[i]: float(probs[i]) for i in range(len(self.vocab))}
         if adapters:
             for adapter in adapters:
                 for word, bias in adapter.items():
@@ -470,10 +526,14 @@ async def update_transformer(
     if key not in _TRANSFORMERS:
         _TRANSFORMERS[key] = MiniSelfAttention(vocab)
     model = _TRANSFORMERS[key]
+    pairs: List[Tuple[List[str], str]] = []
     for msg, resp in zip(messages, responses):
         tokens = lowercase(tokenize(msg))[-5:]
         targets = lowercase(tokenize(resp))
         if not targets:
             continue
-        model.train_step(tokens, targets[0])
-    await asyncio.to_thread(model.save)
+        pairs.append((tokens, targets[0]))
+    if pairs:
+        tokens_batch, targets = zip(*pairs)
+        model.train_step(list(tokens_batch), list(targets))
+        await asyncio.to_thread(model.save)

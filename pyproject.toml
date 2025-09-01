@@ -18,3 +18,4 @@ dependencies = [
 
 [project.optional-dependencies]
 quantum = ["qiskit"]
+quant4 = ["bitarray"]

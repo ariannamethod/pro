@@ -2,6 +2,7 @@ from .blocks import DynamicContextGate, ResonantDropout
 from .modeling_transformer import MemoryAttention, register_kernel
 from .quantum_attention import QuantumAttention
 from .time_fold import TimeFoldTransformer
+from .quant4_infer import Quant4Linear, load_quant4
 
 __all__ = [
     "DynamicContextGate",
@@ -10,6 +11,8 @@ __all__ = [
     "register_kernel",
     "QuantumAttention",
     "TimeFoldTransformer",
+    "Quant4Linear",
+    "load_quant4",
     "get_attention",
 ]
 

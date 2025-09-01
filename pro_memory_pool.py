@@ -3,9 +3,9 @@ import atexit
 import aiosqlite
 import time
 from contextlib import asynccontextmanager
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Tuple, Optional, Union
 
-_DB_PATH: str | None = None
+_DB_PATH: Optional[str] = None
 _POOL: List[aiosqlite.Connection] = []
 _LOCK = asyncio.Lock()
 _CACHE: Dict[Tuple[str, Tuple[Any, ...]], Tuple[float, Any]] = {}
@@ -96,7 +96,7 @@ def clear_cache() -> None:
 
 
 async def execute_cached(
-    query: str, params: Tuple[Any, ...] | List[Any] | None = None, ttl: float = 30.0
+    query: str, params: Optional[Union[Tuple[Any, ...], List[Any]]] = None, ttl: float = 30.0
 ) -> List[Any]:
     """Execute a read-only ``query`` with TTL-based caching.
 

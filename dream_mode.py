@@ -7,7 +7,7 @@ import json
 import logging
 import random
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, List, Tuple, Optional
 
 import pro_memory
 from trainer import Trainer
@@ -37,8 +37,8 @@ if TYPE_CHECKING:  # pragma: no cover - import for type checking only
 
 
 def _load_dialogue_data(
-    path: str | None = None,
-) -> tuple[list[str], list[str]]:
+    path: Optional[str] = None,
+) -> Tuple[List[str], List[str]]:
     """Load prompts and responses from JSON or YAML."""
     data_path = Path(path) if path else _DEFAULT_DATA_FILE
     if data_path.is_file():
@@ -54,11 +54,11 @@ def _load_dialogue_data(
 
 
 def _simulate_dialogue(
-    turns: int = 3, data_path: str | None = None
-) -> list[str]:
+    turns: int = 3, data_path: Optional[str] = None
+) -> List[str]:
     """Generate a simple alternating dialogue."""
     prompts, responses = _load_dialogue_data(data_path)
-    dialogue: list[str] = []
+    dialogue: List[str] = []
     for _ in range(turns):
         dialogue.append(random.choice(prompts))
         dialogue.append(random.choice(responses))
@@ -66,7 +66,7 @@ def _simulate_dialogue(
 
 
 async def run(
-    engine: ProEngine, turns: int = 3, data_path: str | None = None
+    engine: ProEngine, turns: int = 3, data_path: Optional[str] = None
 ) -> None:
     """Generate dialogue and route through the training loop."""
     dialogue = _simulate_dialogue(turns, data_path=data_path)

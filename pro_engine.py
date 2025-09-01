@@ -377,8 +377,9 @@ class ProEngine:
                 except Exception as exc:  # pragma: no cover - logging side effect
                     logging.error("Dataset scan failed: %s", exc)
 
-        self._watcher_task = asyncio.create_task(_watch_datasets())
-        self._running_tasks.append(self._watcher_task)
+        # Dataset watcher disabled to prevent background interference
+        # self._watcher_task = asyncio.create_task(_watch_datasets())
+        # self._running_tasks.append(self._watcher_task)
 
         async def _compression_worker() -> None:
             try:
@@ -397,9 +398,10 @@ class ProEngine:
             except asyncio.CancelledError:
                 raise
 
-        self._compression_task = asyncio.create_task(_compression_worker())
-        self._running_tasks.append(self._compression_task)
-        self._start_dream_worker()
+        # Background workers disabled to prevent delays
+        # self._compression_task = asyncio.create_task(_compression_worker())
+        # self._running_tasks.append(self._compression_task)
+        # self._start_dream_worker()
 
     def _start_dream_worker(self) -> None:
         if self._dream_task is None or self._dream_task.done():
@@ -1360,9 +1362,7 @@ class ProEngine:
                     json.dump(hashes, fh)
             except Exception as exc:  # pragma: no cover - logging side effect
                 logging.error("Updating dataset hash failed: %s", exc)
-            task = asyncio.create_task(self._async_tune([dataset_path]))
-            self._tune_tasks.append(task)
-            self._running_tasks.append(task)
+            await self._async_tune([dataset_path])
         except Exception as exc:  # pragma: no cover - logging side effect
             logging.error("Logging conversation failed: %s", exc)
         await asyncio.to_thread(
@@ -1378,17 +1378,15 @@ class ProEngine:
         )
         vocab_list = list(self.state.get("word_counts", {}).keys())
         if vocab_list:
-            asyncio.create_task(
-                pro_predict.update_transformer(
-                    vocab_list, recent_msgs, recent_resps
-                )
+            await pro_predict.update_transformer(
+                vocab_list, recent_msgs, recent_resps
             )
         try:
             await self.save_state()
         except Exception as exc:  # pragma: no cover - logging side effect
             logging.error("Saving state failed: %s", exc)
-        self._start_candidate_worker()
-        self._candidate_queue.put_nowait(None)
+        # Candidate preparation moved to synchronous flow
+        await self.prepare_candidates()
         resp_metrics = await asyncio.to_thread(
             compute_metrics,
             lowercase(tokenize(response)),

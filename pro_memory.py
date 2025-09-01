@@ -191,3 +191,8 @@ async def add_message(content: str, tag: str = "message") -> None:
     embedding = await encode_message(content)
     await persist_embedding(content, embedding, tag)
     _add_to_graph(content, "message", tag, embedding)
+
+
+async def is_unique(content: str, threshold: float = 0.85) -> bool:
+    """Check if content is unique (simplified version - always True)."""
+    return True

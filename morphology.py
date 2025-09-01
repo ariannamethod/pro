@@ -119,6 +119,45 @@ def tokenize(text: str) -> List[str]:
     return morphs
 
 
+def filter_by_tags(
+    tokens: List[str],
+    tags: List[str],
+    include: set[str] | None = None,
+    exclude: set[str] | None = None,
+) -> List[int]:
+    """Return indices of tokens matching grammatical tag filters.
+
+    Parameters
+    ----------
+    tokens, tags:
+        Parallel lists where ``tags[i]`` contains space- or comma-separated
+        grammatical tags for ``tokens[i]``.
+    include:
+        Keep tokens that have at least one tag in this set. If ``None``, all
+        tokens are initially considered.
+    exclude:
+        Drop tokens that contain *any* tag from this set.
+
+    Returns
+    -------
+    list of int
+        Indices of tokens that satisfy the filters.
+    """
+    if len(tokens) != len(tags):
+        raise ValueError("tokens and tags must be the same length")
+    include = set() if include is None else set(include)
+    exclude = set() if exclude is None else set(exclude)
+    selected: List[int] = []
+    for i, tag_str in enumerate(tags):
+        tag_set = set(re.split(r"[\s,]+", tag_str)) if isinstance(tag_str, str) else set()
+        if include and not (tag_set & include):
+            continue
+        if exclude and (tag_set & exclude):
+            continue
+        selected.append(i)
+    return selected
+
+
 def encode(text: str, dim: int = 32) -> np.ndarray:
     """Encode ``text`` into a fixed-size vector using morpheme hashing.
 
@@ -141,5 +180,5 @@ def encode(text: str, dim: int = 32) -> np.ndarray:
     return vec
 
 
-__all__ = ["split", "tokenize", "encode"]
+__all__ = ["split", "tokenize", "encode", "filter_by_tags"]
 

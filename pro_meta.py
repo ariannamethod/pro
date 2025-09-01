@@ -1,6 +1,7 @@
 import json
 import os
 import asyncio
+from compat import to_thread
 import random
 from typing import Any, Dict, List, Optional
 
@@ -41,7 +42,7 @@ async def _recompute() -> None:
         noise = random.uniform(-0.05, 0.05)
         evolved[k] = max(0.0, min(1.0, v + noise))
     _best_params.update(evolved)
-    await asyncio.to_thread(_save)
+    await to_thread(_save)
 
 
 async def wait_recompute() -> None:

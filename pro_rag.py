@@ -1,4 +1,4 @@
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 import asyncio
 import math
@@ -33,7 +33,7 @@ def _cosine(a: Dict[str, float], b: Dict[str, float]) -> float:
     return dot / (norm_a * norm_b)
 
 
-_external_cache: Dict[tuple[str, str, int, str], List[str]] = {}
+_external_cache: Dict[Tuple[str, str, int, str], List[str]] = {}
 
 
 async def retrieve_external(
@@ -82,7 +82,7 @@ async def retrieve_external(
 async def retrieve(
     query_words: List[str],
     limit: int = 5,
-    external_source: str | None = None,
+    external_source: Optional[str] = None,
     external_limit: int = 3,
     lattice: Optional[MemoryStore] = None,
 ) -> List[str]:

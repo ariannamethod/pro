@@ -874,18 +874,11 @@ class ProEngine:
             if eligible:
                 ordered2 = sorted(eligible, key=lambda w: scores[w])
             else:
-                # Для второго предложения берем ДРУГИЕ слова
-                if scores:
-                    ordered2 = [w for w, _ in sorted(scores.items(), key=lambda x: x[1], reverse=True)]  # Обратная сортировка
-                else:
-                    # Берем слова из морфологии и RAG для разнообразия
-                    import morphology
-                    morph_words = []
-                    for w in attempt_seeds:
-                        variants = morphology.get_word_forms(w)
-                        morph_words.extend(variants[:3])  # По 3 варианта
-                    ordered2 = [w for w in morph_words if w not in tracker and w not in forbidden] or [w for w in ordered if w not in tracker]
-            second_seeds = ordered2[:2]
+                # Простая логика: берем ОБРАТНЫЙ порядок для второго предложения
+                ordered2 = list(reversed(ordered))
+            
+            # Второе предложение из ДРУГИХ слов
+            second_seeds = ordered2[:2] if len(ordered2) >= 2 else ["новое", "интересное"]
 
             metrics_first = await to_thread(
                 compute_metrics,

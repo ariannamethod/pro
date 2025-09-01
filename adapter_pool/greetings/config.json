@@ -1,6 +1,0 @@
-{
-  "name": "greetings",
-  "keywords": ["hello", "hi"],
-  "weights_path": "weights.json",
-  "use_lora": false
-}

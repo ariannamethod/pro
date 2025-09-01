@@ -48,13 +48,25 @@ class ComplexAttention:
         self.v_proj = Linear(dim, 2 * dim)
         self.out_proj = Linear(2 * dim, dim)
 
-    def forward(self, hidden_states: np.ndarray) -> np.ndarray:
+    def forward(
+        self, hidden_states: np.ndarray, resistance: np.ndarray | None = None
+    ) -> np.ndarray:
         """Return attention output for ``hidden_states``.
 
         ``hidden_states`` is interpreted as real-valued input. It is projected
         to complex queries, keys and values. Attention weights are computed
         from the real part of the complex scores. The complex result is
         flattened back to real/imag parts before a final linear projection.
+
+        Parameters
+        ----------
+        hidden_states:
+            Real-valued input tensor with the last dimension representing the
+            feature dimension.
+        resistance:
+            Optional vector of rotation angles. If provided, the complex score
+            matrix is rotated by ``exp(1j * resistance)`` prior to the softmax
+            so that the real component used for weighting is phase-shifted.
         """
 
         q = _to_complex(self.q_proj(hidden_states))
@@ -63,6 +75,9 @@ class ComplexAttention:
 
         scale = 1.0 / math.sqrt(self.dim)
         scores = np.matmul(q, np.conjugate(np.swapaxes(k, -2, -1))) * scale
+        if resistance is not None:
+            rot = np.exp(1j * np.asarray(resistance))
+            scores = scores * rot
         weights = _softmax(scores.real, axis=-1)
         out = np.matmul(weights, v)
         out = np.stack((out.real, out.imag), axis=-1).reshape(

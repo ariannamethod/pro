@@ -71,7 +71,8 @@ class TransformerBlock:
 
     def forward(self, hidden_states: np.ndarray) -> np.ndarray:
         if self.attention is not None:
-            return self.attention(hidden_states)
+            lattice = hidden_states.mean(axis=-1)
+            return self.attention(hidden_states, resistance=lattice)
         q = self.q_proj(hidden_states)
         k = self.k_proj(hidden_states)
         v = self.v_proj(hidden_states)

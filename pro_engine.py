@@ -1119,7 +1119,8 @@ class ProEngine:
             self.state['char_ngram_counts'],
         )
         seed_words = original_words + context_tokens + predicted
-        recent_msgs, recent_resps = await pro_memory.fetch_recent(50)
+        recent_msgs = await pro_memory.fetch_recent_messages(25)
+        recent_resps = await pro_memory.fetch_recent_responses(25)
 
         def _gather_tokens(texts: List[str]) -> List[str]:
             tokens: List[str] = []

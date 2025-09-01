@@ -1,10 +1,10 @@
 import copy
-from typing import Dict, Any
+from typing import Dict, Any, List
 
 from pro_tune import train
 
 
-def construct_layers(macros: Dict[str, Dict[str, Any]]) -> Dict[str, Dict[str, list[float]]]:
+def construct_layers(macros: Dict[str, Dict[str, Any]]) -> Dict[str, Dict[str, List[float]]]:
     """Build simple micro-layer parameter dictionaries from macros.
 
     Parameters

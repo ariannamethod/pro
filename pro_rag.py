@@ -8,7 +8,7 @@ import aiohttp
 
 from pro_metrics import tokenize, lowercase
 import pro_memory
-from memory_simple import MemoryStore
+# MemoryStore не нужен
 import pro_predict
 
 

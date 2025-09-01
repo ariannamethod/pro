@@ -2,6 +2,7 @@
 
 import os
 import asyncio
+import logging
 import aiohttp
 
 TOKEN = os.environ.get("TELEGRAM_TOKEN")
@@ -32,14 +33,20 @@ async def send_message(
         await resp.json()
 
 
+logger = logging.getLogger(__name__)
+
+MAX_RETRIES = 3
+
+
 async def main() -> None:
     from pro_engine import ProEngine
 
     engine = ProEngine()
     await engine.setup()
     offset = None
-    async with aiohttp.ClientSession() as session:
-        retry_count = 0
+    timeout = aiohttp.ClientTimeout(total=10)
+    async with aiohttp.ClientSession(timeout=timeout) as session:
+        retries = 0
         try:
             while True:
                 try:
@@ -53,12 +60,13 @@ async def main() -> None:
                         if chat_id and text:
                             response, _ = await engine.process_message(text)
                             await send_message(session, chat_id, response)
-                    retry_count = 0
-                except Exception as exc:  # pragma: no cover - logging only
-                    print(f"Error: {exc}")
-                    backoff = min(2 ** retry_count, 5)
-                    retry_count += 1
-                    await asyncio.sleep(backoff)
+                    retries = 0
+                except Exception as exc:  # pragma: no cover - network handling
+                    logger.exception("Error handling update: %s", exc)
+                    retries += 1
+                    if retries >= MAX_RETRIES:
+                        logger.error("Max retries exceeded")
+                        raise
         finally:
             await engine.shutdown()
 

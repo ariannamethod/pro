@@ -24,14 +24,14 @@ from pro_metrics import (
     target_length_from_metrics,
 )
 import pro_tune
-# pro_sequence удален
+import pro_sequence
 import pro_memory
 import pro_rag
 import pro_rag_embedding
 import pro_predict
-# pro_forecast удален
+import pro_forecast
 import pro_meta
-# pro_identity удален
+from pro_identity import swap_pronouns
 import message_utils
 
 STATE_PATH = 'pro_state.json'
@@ -476,13 +476,10 @@ class ProEngine:
         if novelty <= self.novelty_threshold:
             return
         try:
-            specialist = await to_thread(
-                pro_spawn.create_specialist, self.state, dataset_path
+            # pro_spawn удален - используем прямое обучение
+            self.state = await to_thread(
+                pro_tune.train, self.state, dataset_path
             )
-            if specialist is not None:
-                self.state = await to_thread(
-                    pro_tune.merge_specialist, self.state, specialist
-                )
         except Exception as exc:  # pragma: no cover - logging side effect
             logging.error("Spawning specialist failed: %s", exc)
 

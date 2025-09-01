@@ -74,19 +74,22 @@ def filter_similar_candidates(
     discarded, preserving the order of first occurrence.
     """
 
-    unique: List[Tuple[np.ndarray, str]] = []
-    for emb, resp in candidates:
-        duplicate = False
-        for u_emb, u_resp in unique:
-            if resp == u_resp:
-                duplicate = True
-                break
-            if float(np.dot(emb, u_emb)) > threshold:
-                duplicate = True
-                break
-        if not duplicate:
-            unique.append((emb, resp))
-    return unique
+    if not candidates:
+        return []
+
+    embeddings = np.stack([emb for emb, _ in candidates])
+    texts = np.array([resp for _, resp in candidates], dtype=object)
+
+    sims = embeddings @ embeddings.T
+    text_eq = texts[:, None] == texts[None, :]
+    dup_matrix = (sims > threshold) | text_eq
+
+    keep = np.ones(len(candidates), dtype=bool)
+    for i in range(len(candidates)):
+        if keep[i]:
+            keep[i + 1 :] &= ~dup_matrix[i, i + 1 :]
+
+    return [cand for cand, k in zip(candidates, keep) if k]
 
 
 def template_penalty(response: str, counts: Dict[str, int]) -> float:

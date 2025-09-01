@@ -14,6 +14,19 @@ def test_filter_similar_candidates_removes_duplicates():
     assert len(set(texts)) == len(texts)
 
 
+def test_filter_similar_candidates_handles_many_duplicates():
+    emb_foo = np.array([1.0, 0.0], dtype=float)
+    emb_bar = np.array([-1.0, 0.0], dtype=float)
+    cands = [
+        (emb_foo, "foo"),
+        (emb_foo, "foo"),
+        (emb_foo, "foo"),
+        (emb_bar, "bar"),
+    ]
+    filtered = pro_engine.filter_similar_candidates(cands, threshold=0.98)
+    assert [t for _, t in filtered] == ["foo", "bar"]
+
+
 def test_rank_candidates_no_duplicate_topn():
     engine = pro_engine.ProEngine()
     engine.candidate_buffer.clear()

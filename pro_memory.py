@@ -9,7 +9,7 @@ import morphology
 import pro_rag_embedding
 from pro_memory_pool import init_pool, close_pool, get_connection
 from memory import MemoryStore
-from resonance.hypergraph import HyperGraph
+# HyperGraph удален - используем простую память
 
 DB_PATH = 'pro_memory.db'
 
@@ -23,7 +23,7 @@ COMPRESSION_INTERVAL = 100
 COMPRESSION_EVENT = asyncio.Event()
 _TOTAL_ADAPTER_USAGE = 0
 
-_GRAPH = HyperGraph()
+_GRAPH = {}  # Упрощенная память вместо HyperGraph
 _LAST_NODE: Optional[str] = None
 
 

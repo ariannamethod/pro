@@ -35,18 +35,8 @@ import pro_rag_embedding
 import pro_predict
 import pro_forecast
 import pro_meta
-import dream_mode
-import lora_utils
-from autoadapt import LayerMutator
 from pro_identity import swap_pronouns
 import message_utils
-from watchfiles import awatch
-from transformers.blocks import SymbolicReasoner, LightweightMoEBlock
-from meta_controller import MetaController
-from api import vector_store
-import pro_spawn
-from memory import cache_layers
-from metrics.timing import timed
 
 STATE_PATH = 'pro_state.json'
 HASH_PATH = 'dataset_sha.json'
@@ -144,17 +134,8 @@ class ProEngine:
         self._candidate_queue: asyncio.Queue = asyncio.Queue()
         self._candidate_worker_task: Optional[asyncio.Task] = None
         self._tune_semaphore = asyncio.BoundedSemaphore(TUNE_CONCURRENCY)
-        self.adapter_pool = self._load_adapters()
-        self.reasoner = SymbolicReasoner()
-        self.light_moe = LightweightMoEBlock(dim=16, num_experts=4)
-        self.meta_controller = MetaController(self)
-        self.layer_config: Dict[str, int] = {}
-        # Cache of tokens for each dataset
-        self._dataset_tokens: Dict[str, List[str]] = {}
         self.ngram_weight = ngram_weight
         self.transformer_weight = transformer_weight
-        self.macro_layers: Dict[str, Dict] = {}
-        self.micro_layers: Dict[str, Dict] = {}
 
     def _load_adapters(self) -> Dict[str, Dict]:
         pool: Dict[str, Dict] = {}

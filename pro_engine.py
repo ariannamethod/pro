@@ -20,6 +20,7 @@ from pro_metrics import (
     lowercase,
     target_length_from_metrics,
 )
+from semantic_collider import SemanticCollider
 import pro_tune
 import pro_sequence
 import pro_memory
@@ -32,7 +33,7 @@ import dream_mode
 import lora_utils
 from autoadapt import LayerMutator
 from pro_identity import swap_pronouns
-import grammar_filters
+import grammar_filters  # noqa: F401
 import message_utils
 from watchfiles import awatch
 from transformers.blocks import SymbolicReasoner, LightweightMoEBlock
@@ -113,6 +114,7 @@ class ProEngine:
         dream_interval: float = 0.5,
         ngram_weight: float = 1.0,
         transformer_weight: float = 1.0,
+        use_collider: bool = False,
     ) -> None:
         self.state: Dict = {
             'word_counts': {},
@@ -153,6 +155,8 @@ class ProEngine:
         self._dataset_tokens: Dict[str, List[str]] = {}
         self.ngram_weight = ngram_weight
         self.transformer_weight = transformer_weight
+        self.use_collider = use_collider
+        self.collider = SemanticCollider() if use_collider else None
 
     def _load_adapters(self) -> Dict[str, Dict]:
         pool: Dict[str, Dict] = {}
@@ -1169,9 +1173,14 @@ class ProEngine:
         vocab = list(self.state.get("word_counts", {}).keys())
         if vocab:
             att_tokens = self._drop_low_saliency(words[-5:])
-            trans_logits = await asyncio.to_thread(
-                pro_predict.transformer_logits, att_tokens, vocab, adapters
-            )
+            if self.use_collider and self.collider is not None:
+                trans_logits = await asyncio.to_thread(
+                    self.collider.scores, att_tokens, vocab
+                )
+            else:
+                trans_logits = await asyncio.to_thread(
+                    pro_predict.transformer_logits, att_tokens, vocab, adapters
+                )
         blend = pro_predict.combine_predictions(
             ngram_pred,
             trans_logits,
@@ -1348,7 +1357,7 @@ class ProEngine:
             words + lowercase(tokenize(response))
         )
         vocab_list = list(self.state.get("word_counts", {}).keys())
-        if vocab_list:
+        if vocab_list and not self.use_collider:
             asyncio.create_task(
                 pro_predict.update_transformer(
                     vocab_list, recent_msgs, recent_resps

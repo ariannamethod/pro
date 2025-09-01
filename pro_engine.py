@@ -178,7 +178,7 @@ class ProEngine:
 
     # Lightweight MoE -----------------------------------------------------
 
-    @timed(name="light_moe_decode")
+    # Декоратор @timed удален
     def light_moe_decode(
         self,
         x: np.ndarray,
@@ -299,10 +299,7 @@ class ProEngine:
         ]:
             self.state.setdefault(key, {})
         self.state.setdefault('architectures', [])
-        arch_cfg = self.meta_controller.select()
-        self._apply_layer_config(arch_cfg)
-        logging.info("Selected architecture: %s", arch_cfg)
-        self.state['architectures'].append(arch_cfg)
+        # Meta controller удален - используем простую конфигурацию
         await self.save_state()
         # Recompute inverse-frequency maps from counts
         for w, c in self.state['word_counts'].items():
@@ -723,7 +720,7 @@ class ProEngine:
             diff_chain.append(diff)
         return diff_chain
 
-    @timed
+    # Декоратор @timed удален
     async def respond(
         self,
         seeds: List[str],
@@ -1067,7 +1064,7 @@ class ProEngine:
                 break
         return deduped
 
-    @timed
+    # Декоратор @timed удален
     async def process_message(self, message: str) -> Tuple[str, Dict]:
         if self.macro_layers:
             self.micro_layers = cache_layers(self.macro_layers)
@@ -1292,7 +1289,7 @@ class ProEngine:
         if vocab_list:
             # Синхронное обновление вместо накопления задач
             await pro_predict.update_transformer(
-                vocab_list, recent_msgs, recent_resps
+                    vocab_list, recent_msgs, recent_resps
             )
         try:
             await self.save_state()

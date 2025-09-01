@@ -18,7 +18,7 @@ from pro_metrics import tokenize, lowercase
 from compat import to_thread
 from pro_memory import DB_PATH
 import pro_memory
-from metrics.timing import timed
+# timed декораторы удалены
 
 TRANSFORMER_PATH = "pro_transformer.npz"
 
@@ -200,7 +200,7 @@ async def _save_worker() -> None:
         _SAVE_TASK.add_done_callback(_log_save_error)
 
 
-@timed
+# @timed удален
 async def update(word_list: List[str]) -> None:
     """Update the co-occurrence graph and vectors with new words.
 

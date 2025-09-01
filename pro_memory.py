@@ -8,7 +8,7 @@ import re
 import morphology
 import pro_rag_embedding
 from pro_memory_pool import init_pool, close_pool, get_connection
-from memory import MemoryStore
+from memory.store import MemoryStore
 # HyperGraph удален - используем простую память
 
 DB_PATH = 'pro_memory.db'

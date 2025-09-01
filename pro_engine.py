@@ -111,6 +111,8 @@ class ProEngine:
         saliency_threshold: float = 0.0,
         novelty_threshold: float = 0.9,
         dream_interval: float = 0.5,
+        ngram_weight: float = 1.0,
+        transformer_weight: float = 1.0,
     ) -> None:
         self.state: Dict = {
             'word_counts': {},
@@ -149,6 +151,8 @@ class ProEngine:
         self.layer_config: Dict[str, int] = {}
         # Cache of tokens for each dataset
         self._dataset_tokens: Dict[str, List[str]] = {}
+        self.ngram_weight = ngram_weight
+        self.transformer_weight = transformer_weight
 
     def _load_adapters(self) -> Dict[str, Dict]:
         pool: Dict[str, Dict] = {}
@@ -1143,19 +1147,19 @@ class ProEngine:
             prev2 = words[-2] if len(words) >= 2 else ""
             prev1 = words[-1]
             ngram_pred = self.predict_next_word(prev2, prev1)
-        trans_pred = ""
+        trans_logits: Dict[str, float] = {}
         vocab = list(self.state.get("word_counts", {}).keys())
         if vocab:
             att_tokens = self._drop_low_saliency(words[-5:])
-            logits = await asyncio.to_thread(
+            trans_logits = await asyncio.to_thread(
                 pro_predict.transformer_logits, att_tokens, vocab, adapters
             )
-            trans_pred = max(logits, key=logits.get)
-        blend: List[str] = []
-        if ngram_pred:
-            blend.append(ngram_pred)
-        if trans_pred and trans_pred != ngram_pred:
-            blend.append(trans_pred)
+        blend = pro_predict.combine_predictions(
+            ngram_pred,
+            trans_logits,
+            self.ngram_weight,
+            self.transformer_weight,
+        )
         predicted.extend(blend)
         mem_fetch = _time(
             "memory_fetch", pro_memory.fetch_similar_messages(message, top_k=5)

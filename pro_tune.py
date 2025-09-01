@@ -3,10 +3,10 @@ import json
 import argparse
 import os
 import asyncio
-from typing import Dict
+from typing import Dict, List, Optional
 
 from pro_metrics import tokenize, lowercase
-import pro_sequence
+# pro_sequence удален
 import pro_predict
 import pro_memory
 from pro_rag import retrieve_external
@@ -16,7 +16,7 @@ _SEP = '\u0001'
 
 
 def train_weighted(
-    state: Dict, dataset_path: str, weight: float, adapters: list[str] | None = None
+    state: Dict, dataset_path: str, weight: float, adapters: Optional[List[str]] = None
 ) -> Dict:
     if weight <= 0:
         logging.warning(
@@ -49,7 +49,7 @@ def train_weighted(
 
 
 def train(
-    state: Dict, dataset_path: str, adapters: list[str] | None = None
+    state: Dict, dataset_path: str, adapters: Optional[List[str]] = None
 ) -> Dict:
     return train_weighted(state, dataset_path, 1.0, adapters)
 

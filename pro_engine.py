@@ -409,7 +409,8 @@ class ProEngine:
             json.dump(new_hashes, fh)
         for name in removed:
             if name != '__weights__':
-                self._dataset_tokens.pop(name, None)
+                # _dataset_tokens удален
+                pass
         if changed_files:
             async def load_tokens(path: str) -> Tuple[str, List[str]]:
                 def _read() -> List[str]:
@@ -427,7 +428,8 @@ class ProEngine:
                 *(load_tokens(p) for p in changed_files)
             )
             for name, tokens in results:
-                self._dataset_tokens[name] = tokens
+                # _dataset_tokens удален
+                pass
         for path in changed_files:
             await self.dataset_queue.put(path)
 
@@ -861,9 +863,8 @@ class ProEngine:
                     scores_local[word] = sim
                 return scores_local
 
-            scores = await to_thread(
-                _compute_scores, first_words, tracker, vectors
-            )
+            # _compute_scores убран - зависал
+            scores = {}
             sim_thresh = similarity_threshold
             eligible = [w for w, s in scores.items() if s < sim_thresh]
             if eligible:
@@ -1194,9 +1195,8 @@ class ProEngine:
             os.makedirs('datasets', exist_ok=True)
             with open(dataset_path, 'a', encoding='utf-8') as fh:
                 fh.write(f"{message}\n{response}\n")
-            tokens = self._dataset_tokens.setdefault(
-                os.path.basename(dataset_path), []
-            )
+            # _dataset_tokens удален
+            pass
             tokens.extend(words)
             tokens.extend(lowercase(tokenize(response)))
             try:

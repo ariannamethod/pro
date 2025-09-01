@@ -1,10 +1,14 @@
 import json
 import random
 import math
+import os
 from collections import deque
 from typing import Dict, List, Optional
 
+import autoadapt
+
 STATE_PATH = "pro_state.json"
+SPAWN_CONFIG = os.path.join(os.path.dirname(__file__), "autoadapt", "meta_spawn.json")
 
 
 class MetaController:
@@ -34,6 +38,29 @@ class MetaController:
         self.tolerance = tolerance
         self._history: deque[float] = deque(maxlen=window)
         self._baseline: Optional[float] = None
+        self._load_autoadapt_blocks()
+
+    # -- Autoadapt ----------------------------------------------------
+    def _load_autoadapt_blocks(self) -> None:
+        """Load and attach autoadapt blocks defined in ``meta_spawn.json``."""
+
+        if not os.path.isfile(SPAWN_CONFIG):
+            return
+        try:
+            with open(SPAWN_CONFIG, "r", encoding="utf-8") as fh:
+                cfg = json.load(fh)
+        except Exception:
+            return
+        for spec in cfg.get("blocks", []):
+            name = spec.get("name")
+            scale = spec.get("scale", 1.0)
+            if not name:
+                continue
+            try:
+                code = autoadapt.generate_block_code(name, scale)
+                self.engine.load_generated_block(code, name)
+            except Exception:
+                continue
 
     def select(self) -> Dict[str, int]:
         """Select an architecture using an epsilon-greedy policy."""

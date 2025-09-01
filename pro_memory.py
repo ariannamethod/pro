@@ -8,7 +8,7 @@ import re
 import morphology
 import pro_rag_embedding
 from pro_memory_pool import init_pool, close_pool, get_connection
-from memory.store import MemoryStore
+from memory_simple import MemoryStore
 # HyperGraph удален - используем простую память
 
 DB_PATH = 'pro_memory.db'
@@ -17,7 +17,7 @@ _MIN_TOKENS = 2
 _BLACKLIST_PATTERNS = [re.compile(r'^v\d+\.\d+$', re.IGNORECASE)]
 
 
-_STORE: Optional[MemoryStore] = None
+# _STORE удален
 _ADAPTER_USAGE: Dict[str, int] = {}
 COMPRESSION_INTERVAL = 100
 COMPRESSION_EVENT = asyncio.Event()
@@ -76,17 +76,15 @@ async def persist_learned_vector(index: int, embedding: np.ndarray) -> None:
             (embedding.tobytes(), index + 1),
         )
         await conn.commit()
-    if _STORE is not None and index < _STORE.embeddings.shape[0]:
-        _STORE.embeddings[index] = embedding
+    # _STORE удален
 
 
 def _add_to_index(content: str, embedding: np.ndarray) -> None:
     """Add a vector to the in-memory search index."""
     global _STORE
     if _STORE is None:
-        _STORE = MemoryStore(dim=embedding.shape[0])
-    _STORE.add_utterance("global", "user", content, embedding)
-
+        # MemoryStore удален - используем только SQLite
+        pass
 
 def _add_to_graph(
     content: str,
@@ -123,7 +121,7 @@ async def build_index(batch_size: int = 100) -> None:
                 first_batch = False
             for content, blob in rows:
                 vec = np.frombuffer(blob, dtype=np.float32)
-                _STORE.add_utterance("global", "user", content, vec)
+                # _STORE удален
             offset += batch_size
     if first_batch:
         _STORE = None

@@ -111,6 +111,20 @@ async def test_store_if_novel_skips_duplicates(engine):
 
 
 @pytest.mark.asyncio
+async def test_store_if_novel_handles_casing_and_whitespace(engine):
+    first = await pro_memory.store_if_novel("Hello world")
+    second = await pro_memory.store_if_novel("hello world")
+    third = await pro_memory.store_if_novel("  Hello   world  ")
+
+    assert first is True
+    assert second is False
+    assert third is False
+
+    messages = await pro_memory.fetch_recent_messages()
+    assert [m for m, _ in messages].count("Hello world") == 1
+
+
+@pytest.mark.asyncio
 async def test_store_if_novel_skips_short_strings(engine):
     stored = await pro_memory.store_if_novel("hi")
     assert stored is False

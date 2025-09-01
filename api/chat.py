@@ -3,12 +3,13 @@
 The API is purposely tiny – it merely demonstrates how dialogue turns are
 serialized into :class:`~memory.store.MemoryStore`.  Each call to
 :func:`ChatAPI.process_message` stores the message and returns a numerical
-representation that has been enriched by the :class:`~transformers.modeling_transformer.MemoryAttention`.
+representation enriched by
+the :class:`~transformers.modeling_transformer.MemoryAttention`.
 """
 
 from __future__ import annotations
 
-from typing import Optional
+from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 
@@ -28,9 +29,16 @@ class ChatAPI:
 
     def process_message(
         self, dialogue_id: str, speaker: str, text: str
-    ) -> np.ndarray:
-        """Store a message and return its vector representation."""
+    ) -> Tuple[np.ndarray, Dict[str, List[str] | str]]:
+        """Store a message and return its vector and dialogue context."""
 
         self.store.add_utterance(dialogue_id, speaker, text)
+        messages = self.retriever.all_messages(dialogue_id)
         hidden = np.zeros((1, self.attention.dim), dtype=np.float32)
-        return self.attention(hidden, dialogue_id, speaker)
+        vector = self.attention(hidden, dialogue_id, speaker)
+        context: Dict[str, List[str] | str] = {
+            "dialogue_id": dialogue_id,
+            "speaker": speaker,
+            "messages": messages,
+        }
+        return vector, context

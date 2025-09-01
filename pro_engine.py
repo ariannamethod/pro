@@ -24,14 +24,14 @@ from pro_metrics import (
     target_length_from_metrics,
 )
 import pro_tune
-import pro_sequence
+# pro_sequence удален
 import pro_memory
 import pro_rag
 import pro_rag_embedding
 import pro_predict
-import pro_forecast
+# pro_forecast удален
 import pro_meta
-from pro_identity import swap_pronouns
+# pro_identity удален
 import message_utils
 
 STATE_PATH = 'pro_state.json'

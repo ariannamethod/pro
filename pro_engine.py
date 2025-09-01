@@ -1052,8 +1052,7 @@ class ProEngine:
 
     # Декоратор @timed удален
     async def process_message(self, message: str) -> Tuple[str, Dict]:
-        if self.macro_layers:
-            self.micro_layers = cache_layers(self.macro_layers)
+        # Macro/micro layers удалены
         best = pro_meta.best_params()
         self.chaos_factor = best.get("chaos_factor", self.chaos_factor)
         self.similarity_threshold = best.get(

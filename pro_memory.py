@@ -23,8 +23,7 @@ COMPRESSION_INTERVAL = 100
 COMPRESSION_EVENT = asyncio.Event()
 _TOTAL_ADAPTER_USAGE = 0
 
-_GRAPH = {}  # Упрощенная память вместо HyperGraph
-_LAST_NODE: Optional[str] = None
+_MESSAGES: List[Tuple[str, str]] = []  # Простая память: (content, kind)
 
 
 def _fingerprint(content: str) -> str:
@@ -97,14 +96,7 @@ def _add_to_graph(
 ) -> None:
     """Insert ``content`` into the conversation hypergraph."""
 
-    global _LAST_NODE
-    data = {"content": content, "tag": tag, "kind": kind}
-    if embedding is not None:
-        data["embedding"] = embedding
-    connect = [_LAST_NODE] if _LAST_NODE else None
-    node_id = _fingerprint(content)
-    _GRAPH.add_node(node_id, data, connect)
-    _LAST_NODE = node_id
+    _MESSAGES.append((content, kind))
 
 
 async def build_index(batch_size: int = 100) -> None:
@@ -326,18 +318,13 @@ async def store_response(sentence: str, tag: Optional[str] = None) -> None:
 async def fetch_recent(limit: int = 5) -> Tuple[List[str], List[str]]:
     """Fetch recent messages and responses from the hypergraph."""
 
-    ids = _GRAPH.trail(limit * 2)
     messages: List[str] = []
     responses: List[str] = []
-    for node_id in ids:
-        node = _GRAPH.get_node(node_id)
-        if node is None:
-            continue
-        kind = node.data.get("kind")
+    for content, kind in _MESSAGES[-limit*2:]:
         if kind == "message":
-            messages.append(node.data["content"])
+            messages.append(content)
         elif kind == "response":
-            responses.append(node.data["content"])
+            responses.append(content)
     return messages[-limit:], responses[-limit:]
 
 

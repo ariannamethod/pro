@@ -537,3 +537,26 @@ async def update_transformer(
         tokens_batch, targets = zip(*pairs)
         model.train_step(list(tokens_batch), list(targets))
         await asyncio.to_thread(model.save)
+
+
+def combine_predictions(
+    ngram_pred: str,
+    trans_logits: Dict[str, float],
+    ngram_weight: float = 1.0,
+    transformer_weight: float = 1.0,
+) -> List[str]:
+    """Combine n-gram and transformer predictions using weighted scores.
+
+    The *ngram_pred* is given a fixed *ngram_weight* while each transformer
+    logit in *trans_logits* is scaled by *transformer_weight*. The resulting
+    unique words are returned sorted by descending score. At most the top two
+    predictions are returned to mirror previous behaviour.
+    """
+
+    scores: Dict[str, float] = {}
+    if ngram_pred:
+        scores[ngram_pred] = scores.get(ngram_pred, 0.0) + ngram_weight
+    for word, logit in (trans_logits or {}).items():
+        scores[word] = scores.get(word, 0.0) + logit * transformer_weight
+    ordered = sorted(scores.items(), key=lambda kv: kv[1], reverse=True)
+    return [w for w, _ in ordered][:2]

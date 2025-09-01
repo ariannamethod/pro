@@ -38,6 +38,7 @@ from transformers.blocks import SymbolicReasoner, LightweightMoEBlock
 from meta_controller import MetaController
 from api import vector_store
 import pro_spawn
+from memory import cache_layers
 from metrics.timing import timed
 
 STATE_PATH = 'pro_state.json'
@@ -152,6 +153,8 @@ class ProEngine:
         self._dataset_tokens: Dict[str, List[str]] = {}
         self.ngram_weight = ngram_weight
         self.transformer_weight = transformer_weight
+        self.macro_layers: Dict[str, Dict] = {}
+        self.micro_layers: Dict[str, Dict] = {}
 
     def _load_adapters(self) -> Dict[str, Dict]:
         pool: Dict[str, Dict] = {}
@@ -1154,6 +1157,8 @@ class ProEngine:
 
     @timed
     async def process_message(self, message: str) -> Tuple[str, Dict]:
+        if self.macro_layers:
+            self.micro_layers = cache_layers(self.macro_layers)
         best = pro_meta.best_params()
         self.chaos_factor = best.get("chaos_factor", self.chaos_factor)
         self.similarity_threshold = best.get(

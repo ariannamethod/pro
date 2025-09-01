@@ -60,11 +60,21 @@ class DynamicContextGate:
             self.bias = state["bias"]
 
 
+def _apply_mask(
+    x: npt.NDArray[np.complex64], mask: npt.NDArray[np.bool_] | None
+) -> npt.NDArray[np.complex64]:
+    if mask is None:
+        return x
+    return x[mask]
+
+
 def amplitude_attention(
     query: npt.NDArray[np.complex64],
     key: npt.NDArray[np.complex64],
+    mask: npt.NDArray[np.bool_] | None = None,
 ) -> npt.NDArray[np.complex64]:
     """Return amplitude-based attention weights."""
+    key = _apply_mask(key, mask)
     scores = (query @ key.conj().T) / np.sqrt(key.shape[-1])
     return np.abs(scores).astype(np.complex64)
 
@@ -72,8 +82,10 @@ def amplitude_attention(
 def phase_attention(
     query: npt.NDArray[np.complex64],
     key: npt.NDArray[np.complex64],
+    mask: npt.NDArray[np.bool_] | None = None,
 ) -> npt.NDArray[np.complex64]:
     """Return phase-based attention weights."""
+    key = _apply_mask(key, mask)
     scores = (query @ key.conj().T) / np.sqrt(key.shape[-1])
     return np.exp(1j * np.angle(scores)).astype(np.complex64)
 
@@ -82,8 +94,11 @@ def wave_attention(
     query: npt.NDArray[np.complex64],
     key: npt.NDArray[np.complex64],
     value: npt.NDArray[np.complex64],
+    mask: npt.NDArray[np.bool_] | None = None,
 ) -> npt.NDArray[np.complex64]:
     """Combine amplitude and phase attention into a complex output."""
+    key = _apply_mask(key, mask)
+    value = _apply_mask(value, mask)
     amp = amplitude_attention(query, key)
     phase = phase_attention(query, key)
     weights = amp * phase

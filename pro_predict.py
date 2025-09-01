@@ -27,9 +27,9 @@ _VECTORS: Dict[str, Dict[str, float]] = {}
 _SYNONYMS: Dict[str, str] = {}
 _LOCK = threading.RLock()
 _SAVE_TASK: Optional[asyncio.Task] = None
-_FLUSH_TASK: Optional[asyncio.Task] = None
+_SAVE_WORKER: Optional[asyncio.Task] = None
+_SAVE_QUEUE: Optional[asyncio.Queue[None]] = None
 _INIT_TASK: Optional[asyncio.Task] = None
-_FLUSH_EVENT: Optional[asyncio.Event] = None
 
 
 @contextlib.contextmanager
@@ -168,7 +168,9 @@ def _log_save_error(task: asyncio.Task) -> None:
 
 
 async def wait_save_task() -> None:
-    global _SAVE_TASK
+    global _SAVE_TASK, _SAVE_QUEUE
+    if _SAVE_QUEUE is not None:
+        await _SAVE_QUEUE.join()
     if _SAVE_TASK is not None:
         try:
             await _SAVE_TASK
@@ -179,12 +181,23 @@ async def wait_save_task() -> None:
         _SAVE_TASK = None
 
 
-async def _flush_worker() -> None:
-    assert _FLUSH_EVENT is not None
+async def _save_worker() -> None:
+    global _SAVE_TASK
+    assert _SAVE_QUEUE is not None
     while True:
-        await _FLUSH_EVENT.wait()
-        _FLUSH_EVENT.clear()
-        await wait_save_task()
+        await _SAVE_QUEUE.get()
+        _SAVE_QUEUE.task_done()
+        if _SAVE_TASK is not None:
+            try:
+                await _SAVE_TASK
+            except asyncio.CancelledError:
+                pass
+            except Exception as exc:
+                logging.error("Saving embeddings failed: %s", exc)
+        _SAVE_TASK = asyncio.create_task(
+            asyncio.to_thread(save_embeddings, _GRAPH, _VECTORS)
+        )
+        _SAVE_TASK.add_done_callback(_log_save_error)
 
 
 @timed
@@ -194,7 +207,7 @@ async def update(word_list: List[str]) -> None:
     The *word_list* should contain individual tokens. After the update the
     words become part of the internal vocabulary used by :func:`suggest`.
     """
-    global _VECTORS, _SAVE_TASK, _FLUSH_TASK, _FLUSH_EVENT
+    global _VECTORS, _SAVE_QUEUE, _SAVE_WORKER
     await _ensure_vectors()
     with _vector_lock():
         words = lowercase(word_list)
@@ -206,15 +219,11 @@ async def update(word_list: List[str]) -> None:
                 _GRAPH.setdefault(word, Counter())[other] += 1
                 _GRAPH.setdefault(other, Counter())[word] += 1
         _VECTORS = _build_embeddings(_GRAPH)
-    if _FLUSH_EVENT is None:
-        _FLUSH_EVENT = asyncio.Event()
-    if _FLUSH_TASK is None or _FLUSH_TASK.done():
-        _FLUSH_TASK = asyncio.create_task(_flush_worker())
-    _SAVE_TASK = asyncio.create_task(
-        asyncio.to_thread(save_embeddings, _GRAPH, _VECTORS)
-    )
-    _SAVE_TASK.add_done_callback(_log_save_error)
-    _FLUSH_EVENT.set()
+    loop = asyncio.get_running_loop()
+    if _SAVE_QUEUE is None or _SAVE_WORKER is None or _SAVE_WORKER.done():
+        _SAVE_QUEUE = asyncio.Queue()
+        _SAVE_WORKER = loop.create_task(_save_worker())
+    await _SAVE_QUEUE.put(None)
 
 
 TOKENS_QUEUE: Optional[asyncio.Queue[List[str]]] = None

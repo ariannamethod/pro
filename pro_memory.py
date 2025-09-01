@@ -73,22 +73,15 @@ def _add_to_index(content: str, embedding: np.ndarray) -> None:
     _STORE.add_utterance("global", "user", content, embedding)
 
 
-async def build_index(
-    batch_size: int = 100, yield_every: int | None = None
-) -> None:
+async def build_index(batch_size: int = 100) -> None:
     """Load stored embeddings into the in-memory index in batches.
 
     Args:
         batch_size: Number of rows fetched per database query.
-        yield_every: After this many batches, yield control back to the
-            event loop by awaiting ``asyncio.sleep(0)``. If ``None`` or ``0``,
-            no yielding occurs. This allows large indexing jobs to avoid
-            starving the event loop.
     """
     global _STORE
     offset = 0
     first_batch = True
-    batch_count = 0
     async with get_connection() as conn:
         while True:
             async with conn.execute(
@@ -106,9 +99,6 @@ async def build_index(
                 vec = np.frombuffer(blob, dtype=np.float32)
                 _STORE.add_utterance("global", "user", content, vec)
             offset += batch_size
-            batch_count += 1
-            if yield_every and batch_count % yield_every == 0:
-                await asyncio.sleep(0)
     if first_batch:
         _STORE = None
 

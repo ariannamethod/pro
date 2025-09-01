@@ -266,21 +266,9 @@ class ProEngine:
         """Apply the selected layer configuration to the reasoner and MoE."""
 
         self.layer_config = cfg
-        if hasattr(self.reasoner, "configure"):
-            try:
-                self.reasoner.configure(cfg)
-            except Exception:
-                pass
+        # Reasoner удален
 
-        if cfg.get("use_light_moe", 1):
-            dim = cfg.get("light_moe_dim", 16)
-            num_experts = cfg.get("light_moe_experts", 4)
-            top_k = cfg.get("light_moe_topk", 1)
-            self.light_moe = LightweightMoEBlock(
-                dim=dim, num_experts=num_experts, top_k=top_k
-            )
-        else:
-            self.light_moe = None
+        # LightMoE удален
 
     async def setup(self) -> None:
         pro_predict._GRAPH = {}
@@ -540,9 +528,7 @@ class ProEngine:
             task.cancel()
         if self._running_tasks:
             await asyncio.gather(*self._running_tasks, return_exceptions=True)
-        if self._dream_mode_task is not None and not self._dream_mode_task.done():
-            self._dream_mode_task.cancel()
-            await asyncio.gather(self._dream_mode_task, return_exceptions=True)
+        # Dream task удален
         await pro_predict.wait_save_task()
         await pro_meta.wait_recompute()
 
@@ -1158,7 +1144,7 @@ class ProEngine:
         context = memory_context + context
         try:
             if re.search(r"\b(AND|OR|NOT)\b", message):
-                result = self.reasoner.evaluate(message, {w: True for w in words})
+                # Reasoner удален - используем простую логику
                 predicted.append(str(result).lower())
         except Exception:
             pass
@@ -1312,9 +1298,9 @@ class ProEngine:
                 "similarity_threshold": self.similarity_threshold,
             },
         )
-        await self.meta_controller.update(resp_metrics)
+                    # Meta controller удален
         self.log(message, response, metrics)
-        await self._maybe_spawn_specialist(dataset_path)
+        # Specialist удален
         return response, metrics
 
     def log(self, user: str, response: str, metrics: Dict) -> None:

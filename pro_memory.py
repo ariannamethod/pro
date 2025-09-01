@@ -1,6 +1,6 @@
 import asyncio
 import atexit
-from typing import Dict, List, Tuple, Optional
+from typing import Dict, List, Tuple, Optional, Set
 
 import hashlib
 import numpy as np
@@ -17,14 +17,14 @@ _MIN_TOKENS = 2
 _BLACKLIST_PATTERNS = [re.compile(r'^v\d+\.\d+$', re.IGNORECASE)]
 
 
-_STORE: MemoryStore | None = None
+_STORE: Optional[MemoryStore] = None
 _ADAPTER_USAGE: Dict[str, int] = {}
 COMPRESSION_INTERVAL = 100
 COMPRESSION_EVENT = asyncio.Event()
 _TOTAL_ADAPTER_USAGE = 0
 
 _GRAPH = HyperGraph()
-_LAST_NODE: str | None = None
+_LAST_NODE: Optional[str] = None
 
 
 def _fingerprint(content: str) -> str:
@@ -93,7 +93,7 @@ def _add_to_graph(
     content: str,
     kind: str,
     tag: Optional[str] = None,
-    embedding: np.ndarray | None = None,
+    embedding: Optional[np.ndarray] = None,
 ) -> None:
     """Insert ``content`` into the conversation hypergraph."""
 
@@ -279,7 +279,7 @@ async def add_concept(description: str) -> None:
         await conn.commit()
 
 
-def _token_trigrams(text: str) -> set[str]:
+def _token_trigrams(text: str) -> Set[str]:
     """Return a set of token trigrams from ``text``."""
     tokens = re.findall(r"\w+", text.lower())
     if len(tokens) < 3:
@@ -290,7 +290,7 @@ def _token_trigrams(text: str) -> set[str]:
     }
 
 
-def _jaccard(a: set[str], b: set[str]) -> float:
+def _jaccard(a: Set[str], b: Set[str]) -> float:
     """Compute Jaccard similarity between two trigram sets."""
     if not a and not b:
         return 1.0

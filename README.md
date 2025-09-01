@@ -225,6 +225,14 @@ Reflections guide gradual corrections.
 Selects quantum or classical paths from patch features. Decisions refine bandwidth use. This router keeps computations balanced.
 Such design smooths future scaling.
 
+### Weightless Resonant Paths
+
+`router.ResonantRouter` searches for resonant routes without relying on
+learned weights by inspecting Fourier phases of incoming features.  Combined
+with the fractal token embeddings provided by `quantum_memory.QuantumMemory`
+it offers a tiny demonstration of weightless semantics.  Run
+`python scripts/weightless_demo.py` to see both components in action.
+
 ### Peer-to-Peer Resonance
 
 Shares gradient hashes between nodes without central servers. Exchanges apply updates in both directions. These links keep replicas harmonized. This method eases later adjustments.

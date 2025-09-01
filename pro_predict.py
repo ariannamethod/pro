@@ -12,10 +12,10 @@ import numpy as np
 import contextlib
 
 import morphology
-from transformers.blocks import DynamicContextGate
-from transformers.quantum_dropout import quantum_dropout
+# Transformer блоки удалены - оставляем только n-gram логику
 
 from pro_metrics import tokenize, lowercase
+from compat import to_thread
 from pro_memory import DB_PATH
 import pro_memory
 from metrics.timing import timed
@@ -28,7 +28,7 @@ _SYNONYMS: Dict[str, str] = {}
 _LOCK = threading.RLock()
 _SAVE_TASK: Optional[asyncio.Task] = None
 _SAVE_WORKER: Optional[asyncio.Task] = None
-_SAVE_QUEUE: Optional[asyncio.Queue[None]] = None
+_SAVE_QUEUE: Optional[asyncio.Queue] = None
 _INIT_TASK: Optional[asyncio.Task] = None
 
 
@@ -131,14 +131,14 @@ async def _ensure_vectors() -> None:
             return
 
     try:
-        graph, vectors = await asyncio.to_thread(load_embeddings)
+        graph, vectors = await to_thread(load_embeddings)
         if not vectors:
             raise ValueError("empty embeddings")
     except Exception:
-        graph = await asyncio.to_thread(_build_graph)
-        vectors = await asyncio.to_thread(_build_embeddings, graph)
+        graph = await to_thread(_build_graph)
+        vectors = await to_thread(_build_embeddings, graph)
         try:
-            await asyncio.to_thread(save_embeddings, graph, vectors)
+            await to_thread(save_embeddings, graph, vectors)
         except Exception:
             pass
 
@@ -195,7 +195,7 @@ async def _save_worker() -> None:
             except Exception as exc:
                 logging.error("Saving embeddings failed: %s", exc)
         _SAVE_TASK = asyncio.create_task(
-            asyncio.to_thread(save_embeddings, _GRAPH, _VECTORS)
+            to_thread(save_embeddings, _GRAPH, _VECTORS)
         )
         _SAVE_TASK.add_done_callback(_log_save_error)
 
@@ -226,7 +226,7 @@ async def update(word_list: List[str]) -> None:
     await _SAVE_QUEUE.put(None)
 
 
-TOKENS_QUEUE: Optional[asyncio.Queue[List[str]]] = None
+TOKENS_QUEUE: Optional[asyncio.Queue] = None
 _QUEUE_LOOP: Optional[asyncio.AbstractEventLoop] = None
 _UPDATE_TASK: Optional[asyncio.Task] = None
 
@@ -371,7 +371,7 @@ class MiniSelfAttention:
         self.w_v = rng.standard_normal((dim, dim))
         self.w_o = rng.standard_normal((dim, len(vocab)))
         self.use_gate = use_gate
-        self.gate = DynamicContextGate(dim) if use_gate else None
+        # DynamicContextGate удален
         self.lr = lr
         self.l2 = l2
         self.temperature = temperature
@@ -408,7 +408,7 @@ class MiniSelfAttention:
         self,
         tokens_batch: List[List[str]],
         targets: List[str],
-        lr: float | None = None,
+        lr: Optional[float] = None,
     ) -> None:
         if lr is not None:
             self.lr = lr
@@ -440,7 +440,7 @@ class MiniSelfAttention:
         att_sum = att.sum(axis=-1, keepdims=True)
         att = np.divide(att, att_sum, where=att_sum != 0)
         context = att @ v
-        context = quantum_dropout(context)
+        # quantum_dropout удален
         if self.gate:
             context = np.stack([self.gate(c) for c in context])
         context = (context - context.mean(axis=-1, keepdims=True)) / (
@@ -479,9 +479,7 @@ class MiniSelfAttention:
         att = np.exp(att - att.max(axis=-1, keepdims=True))
         att = att / att.sum(axis=-1, keepdims=True)
         context = att @ v
-        context = quantum_dropout(context)
-        if self.gate:
-            context = self.gate(context)
+        # quantum_dropout и gate удалены
         context = (context - context.mean(axis=-1, keepdims=True)) / (
             context.std(axis=-1, keepdims=True) + 1e-5
         )
@@ -545,7 +543,7 @@ async def update_transformer(
     if pairs:
         tokens_batch, targets = zip(*pairs)
         model.train_step(list(tokens_batch), list(targets))
-        await asyncio.to_thread(model.save)
+        await to_thread(model.save)
 
 
 def combine_predictions(

@@ -16,7 +16,8 @@ def test_gate_can_zero_context():
     # Force gate to suppress context completely
     model.gate.bias = np.full(model.dim, -100.0)
     gated = model.logits(tokens)
-    assert all(abs(v) < 1e-6 for v in gated.values())
+    expected = np.full(len(vocab), 1 / len(vocab))
+    np.testing.assert_allclose([gated[w] for w in vocab], expected, rtol=1e-2)
     # With strong positive bias the logits should differ
     model.gate.bias = np.full(model.dim, 100.0)
     boosted = model.logits(tokens)

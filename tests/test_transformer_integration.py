@@ -67,6 +67,25 @@ def test_logits_shift_after_training(tmp_path, monkeypatch):
     assert after != before
 
 
+def test_distribution_changes_after_training(tmp_path, monkeypatch):
+    db_path = tmp_path / "mem.db"
+    monkeypatch.setattr(pro_memory, "DB_PATH", str(db_path))
+    asyncio.run(pro_memory.init_db())
+    if os.path.exists("pro_transformer.npz"):
+        os.remove("pro_transformer.npz")
+    asyncio.run(pro_memory.add_message("hello world"))
+    asyncio.run(pro_memory.store_response("foo"))
+    vocab = ["hello", "world", "foo"]
+    before = np.array(
+        list(pro_predict.transformer_logits(["hello", "world"], vocab).values())
+    )
+    asyncio.run(pro_predict.update_transformer(vocab))
+    after = np.array(
+        list(pro_predict.transformer_logits(["hello", "world"], vocab).values())
+    )
+    assert not np.allclose(before, after)
+
+
 def test_memory_attention_encodes_morphology():
     from transformers.modeling_transformer import MemoryAttention
     import numpy as np

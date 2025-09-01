@@ -32,7 +32,6 @@ import dream_mode
 import lora_utils
 from autoadapt import LayerMutator
 from pro_identity import swap_pronouns
-import grammar_filters
 import message_utils
 from watchfiles import awatch
 from transformers.blocks import SymbolicReasoner, LightweightMoEBlock
@@ -790,6 +789,25 @@ class ProEngine:
         best_seq = beams[0][0] if beams else start_seq
         return best_seq[:target_length]
 
+    # ------------------------------------------------------------------
+    def _semantic_diff_sequence(self, sequences: List[List[str]]) -> List[List[str]]:
+        """Build a chain of semantic diffs between successive sequences.
+
+        Each sequence is filtered to only include words that have not appeared
+        in previous sequences.  The resulting list mirrors the input structure
+        but guarantees that information is carried forward purely through
+        differences.  It provides a primitive yet useful scaffold for building
+        responses from "semantic diffs" rather than direct copying.
+        """
+
+        seen: Set[str] = set()
+        diff_chain: List[List[str]] = []
+        for seq in sequences:
+            diff = [w for w in seq if w.lower() not in seen]
+            seen.update(w.lower() for w in diff)
+            diff_chain.append(diff)
+        return diff_chain
+
     @timed
     async def respond(
         self,
@@ -1047,7 +1065,13 @@ class ProEngine:
                 parts2 = sentence2.rstrip(".").split()
                 parts2[-1] = replacement2
                 sentence2 = " ".join(parts2) + "."
-
+            first_words = sentence1.rstrip(".").split()
+            second_words = sentence2.rstrip(".").split()
+            diff_first, diff_second = self._semantic_diff_sequence(
+                [first_words, second_words]
+            )
+            sentence1 = " ".join(diff_first) + "."
+            sentence2 = " ".join(diff_second) + "."
             response = sentence1 + " " + sentence2
             for tok, analog in analog_map.items():
                 pattern = re.compile(rf"\b{re.escape(tok)}\b", re.IGNORECASE)

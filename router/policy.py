@@ -1,6 +1,6 @@
-from __future__ import annotations
-
 """Routing policy for hybrid quantum/classical attention."""
+
+from __future__ import annotations
 
 import numpy as np
 
@@ -36,3 +36,25 @@ class PatchRoutingPolicy:
         grad = (decisions.astype(float) - probs)[:, None] * features
         self.weights += self.lr * reward * grad.mean(axis=0)
         self._last = None
+
+
+class ResonantRouter:
+    """Weightless routing via resonant feature search.
+
+    Instead of learned weights we look for self-similarity in the patch
+    features.  A patch is routed to the quantum backend when the mean phase of
+    its Fourier spectrum crosses a threshold, indicating a strong internal
+    resonance.  This provides a cheap, deterministic alternative suitable for
+    demos and constrained environments.
+    """
+
+    def __init__(self, threshold: float = 0.0) -> None:
+        self.threshold = threshold
+
+    def route(self, features: np.ndarray) -> np.ndarray:
+        """Return mask of resonant patches without using weights."""
+
+        spectrum = np.fft.fft(features, axis=1)
+        phases = np.angle(spectrum)
+        resonance = np.cos(phases).mean(axis=1)
+        return resonance > self.threshold

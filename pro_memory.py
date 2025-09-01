@@ -9,6 +9,7 @@ import morphology
 import pro_rag_embedding
 from pro_memory_pool import init_pool, close_pool, get_connection
 from memory import MemoryStore
+from resonance.hypergraph import HyperGraph
 
 DB_PATH = 'pro_memory.db'
 
@@ -21,6 +22,9 @@ _ADAPTER_USAGE: Dict[str, int] = {}
 COMPRESSION_INTERVAL = 100
 COMPRESSION_EVENT = asyncio.Event()
 _TOTAL_ADAPTER_USAGE = 0
+
+_GRAPH = HyperGraph()
+_LAST_NODE: str | None = None
 
 
 def _fingerprint(content: str) -> str:
@@ -83,6 +87,24 @@ def _add_to_index(content: str, embedding: np.ndarray) -> None:
     if _STORE is None:
         _STORE = MemoryStore(dim=embedding.shape[0])
     _STORE.add_utterance("global", "user", content, embedding)
+
+
+def _add_to_graph(
+    content: str,
+    kind: str,
+    tag: Optional[str] = None,
+    embedding: np.ndarray | None = None,
+) -> None:
+    """Insert ``content`` into the conversation hypergraph."""
+
+    global _LAST_NODE
+    data = {"content": content, "tag": tag, "kind": kind}
+    if embedding is not None:
+        data["embedding"] = embedding
+    connect = [_LAST_NODE] if _LAST_NODE else None
+    node_id = _fingerprint(content)
+    _GRAPH.add_node(node_id, data, connect)
+    _LAST_NODE = node_id
 
 
 async def build_index(batch_size: int = 100) -> None:
@@ -181,6 +203,7 @@ async def add_message(content: str, tag: Optional[str] = None) -> None:
     fingerprint = _fingerprint(content)
     await persist_embedding(content, embedding, tag, fingerprint)
     _add_to_index(content, embedding)
+    _add_to_graph(content, "message", tag, embedding)
 
 
 async def store_if_novel(
@@ -222,6 +245,7 @@ async def store_if_novel(
 
     await persist_embedding(content, embedding, tag, fingerprint)
     _add_to_index(content, embedding)
+    _add_to_graph(content, "message", tag, embedding)
     return True
 
 
@@ -296,38 +320,37 @@ async def store_response(sentence: str, tag: Optional[str] = None) -> None:
             (sentence, tag),
         )
         await conn.commit()
+    _add_to_graph(sentence, "response", tag)
 
 
 async def fetch_recent(limit: int = 5) -> Tuple[List[str], List[str]]:
-    """Fetch recent messages and responses for context."""
-    async with get_connection() as conn:
-        async with conn.execute(
-            'SELECT content FROM messages ORDER BY id DESC LIMIT ?',
-            (limit,),
-        ) as cur:
-            msg_rows = await cur.fetchall()
-        async with conn.execute(
-            'SELECT content FROM responses ORDER BY id DESC LIMIT ?',
-            (limit,),
-        ) as cur:
-            resp_rows = await cur.fetchall()
-    messages = [r[0] for r in msg_rows][::-1]
-    responses = [r[0] for r in resp_rows][::-1]
-    return messages, responses
+    """Fetch recent messages and responses from the hypergraph."""
+
+    ids = _GRAPH.trail(limit * 2)
+    messages: List[str] = []
+    responses: List[str] = []
+    for node_id in ids:
+        node = _GRAPH.get_node(node_id)
+        if node is None:
+            continue
+        kind = node.data.get("kind")
+        if kind == "message":
+            messages.append(node.data["content"])
+        elif kind == "response":
+            responses.append(node.data["content"])
+    return messages[-limit:], responses[-limit:]
 
 
 async def fetch_recent_messages(limit: int = 50) -> List[Tuple[str, np.ndarray]]:
-    """Fetch recent messages with embeddings."""
-    async with get_connection() as conn:
-        async with conn.execute(
-            'SELECT content, embedding FROM messages ORDER BY id DESC LIMIT ?',
-            (limit,),
-        ) as cur:
-            rows = await cur.fetchall()
-    messages = [
-        (r[0], np.frombuffer(r[1], dtype=np.float32)) for r in rows
-    ][::-1]
-    return messages
+    """Fetch recent messages with embeddings from the hypergraph."""
+
+    ids = _GRAPH.trail(limit * 2)
+    results: List[Tuple[str, np.ndarray]] = []
+    for node_id in ids:
+        node = _GRAPH.get_node(node_id)
+        if node and node.data.get("kind") == "message" and "embedding" in node.data:
+            results.append((node.data["content"], node.data["embedding"]))
+    return results[-limit:]
 
 
 async def fetch_similar_messages(query: str, top_k: int = 5) -> List[str]:

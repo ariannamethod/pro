@@ -43,10 +43,14 @@ class MemoryStore:
         Otherwise the text is encoded (or the provided vector is used) and the
         resulting embedding participates in gradient-based retrieval.
         """
+        dialogue = self.graph.setdefault(dialogue_id, [])
+        for node in dialogue:
+            if node.speaker == speaker and node.text == text:
+                return None
 
         if isinstance(embedding, dict):
             node = MemoryNode(speaker, text, embedding=embedding)
-            self.graph.setdefault(dialogue_id, []).append(node)
+            dialogue.append(node)
             return None
 
         vec = anp.array(
@@ -58,7 +62,7 @@ class MemoryStore:
             self.embeddings = vec.reshape(1, -1)
         idx = self.embeddings.shape[0] - 1
         node = MemoryNode(speaker, text, index=idx, morph_codes=vec.tolist())
-        self.graph.setdefault(dialogue_id, []).append(node)
+        dialogue.append(node)
         return self.embeddings[idx]
 
     def get_dialogue(self, dialogue_id: str) -> List[MemoryNode]:

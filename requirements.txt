@@ -8,3 +8,6 @@ aiohttp
 
 # Optional quantum dependencies
 # qiskit (install with `pip install .[quantum]`)
+
+# Optional quantisation dependencies
+# bitarray (install with `pip install bitarray`)

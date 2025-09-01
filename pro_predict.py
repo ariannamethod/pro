@@ -441,8 +441,7 @@ class MiniSelfAttention:
         att = np.divide(att, att_sum, where=att_sum != 0)
         context = att @ v
         # quantum_dropout удален
-        if self.gate:
-            context = np.stack([self.gate(c) for c in context])
+        # gate удален
         context = (context - context.mean(axis=-1, keepdims=True)) / (
             context.std(axis=-1, keepdims=True) + 1e-5
         )

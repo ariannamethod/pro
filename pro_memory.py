@@ -23,6 +23,27 @@ def _add_to_graph(content: str, msg_type: str, tag: str, embedding: Optional[np.
 async def init_db() -> None:
     """Initialize the database pool."""
     await init_pool(DB_PATH)
+    
+    # Создаем таблицы если их нет
+    async with get_connection() as conn:
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS embeddings (
+                id INTEGER PRIMARY KEY,
+                content TEXT NOT NULL,
+                embedding BLOB NOT NULL,
+                tag TEXT DEFAULT 'message',
+                fingerprint TEXT DEFAULT ''
+            )
+        """)
+        
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS adapter_usage (
+                name TEXT PRIMARY KEY,
+                count INTEGER DEFAULT 0
+            )
+        """)
+        
+        await conn.commit()
 
 
 async def close_db() -> None:

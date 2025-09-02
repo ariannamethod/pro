@@ -1035,7 +1035,7 @@ class ProEngine:
         original_words = tokenize(message)
         words = lowercase(original_words)
         # Адаптеры удалены
-        words = swap_pronouns(words)
+        # words = swap_pronouns(words)  # УБРАНО - инверсия только в respond()
         user_forbidden = set(words)
         async def _time(name: str, coro):
             start = time.perf_counter()

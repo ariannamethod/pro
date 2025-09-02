@@ -13,8 +13,8 @@ API_URL = f"https://api.telegram.org/bot{TOKEN}"
 
 
 async def get_updates(
-    session: aiohttp.ClientSession, offset: int | None = None
-) -> list[dict]:
+    session: aiohttp.ClientSession, offset=None
+):
     params = {"timeout": 30}
     if offset is not None:
         params["offset"] = offset

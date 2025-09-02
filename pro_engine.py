@@ -433,7 +433,7 @@ class ProEngine:
         for path in changed_files:
             await self.dataset_queue.put(path)
 
-    async def _async_tune(self, paths: List[str]) -> None:
+    async def _async_tune(self, paths: List[str], message_metrics: Optional[Dict] = None) -> None:
         tuned: List[str] = []
         weights: Dict[str, float] = {}
         if os.path.exists('dataset_weights.json'):
@@ -448,13 +448,13 @@ class ProEngine:
                 try:
                     weight = float(weights.get(os.path.basename(path), 1.0))
                     # Адаптеры удалены
-                    adapter_names = [n for n, _ in adapters]
                     await to_thread(
                         pro_tune.train_weighted,
                         self.state,
                         path,
                         weight,
-                        adapter_names,
+                        None,  # adapters удалены
+                        message_metrics,
                     )
                     tuned.append(os.path.basename(path))
                 except Exception as exc:  # pragma: no cover - logging side effect
@@ -479,7 +479,7 @@ class ProEngine:
             # pro_spawn удален - используем прямое обучение
             self.state = await to_thread(
                 pro_tune.train, self.state, dataset_path
-            )
+                )
         except Exception as exc:  # pragma: no cover - logging side effect
             logging.error("Spawning specialist failed: %s", exc)
 
@@ -1212,9 +1212,12 @@ class ProEngine:
                     json.dump(hashes, fh)
             except Exception as exc:  # pragma: no cover - logging side effect
                 logging.error("Updating dataset hash failed: %s", exc)
-            # Управляемое обучение вместо накопления задач
+            # Управляемое обучение вместо накопления задач + передача метрик
             if not self._tune_semaphore.locked():
-                await self._async_tune([dataset_path])
+                # Добавляем слова в метрики для семантического поиска
+                enhanced_metrics = dict(metrics)
+                enhanced_metrics['words'] = words
+                await self._async_tune([dataset_path], enhanced_metrics)
         except Exception as exc:  # pragma: no cover - logging side effect
             logging.error("Logging conversation failed: %s", exc)
         await to_thread(

@@ -33,6 +33,7 @@ import pro_forecast
 import pro_meta
 from pro_identity import swap_pronouns
 import message_utils
+import grammar_filters
 
 STATE_PATH = 'pro_state.json'
 HASH_PATH = 'dataset_sha.json'

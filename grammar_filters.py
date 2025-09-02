@@ -1,6 +1,7 @@
 """Грамматические фильтры для SmallTalk PRO"""
 
 import re
+from typing import Optional
 
 # Базовые правила (совместимые с Python 3.7)
 ARTICLE_PAIR_RE = re.compile(r"\b(a|an)\s+(a|an)\b", re.IGNORECASE)
@@ -95,7 +96,9 @@ def swap_pronouns(words):
     
     return [pronoun_map.get(word, word) for word in words]
 
-def debug_filters(text: str) -> tuple[bool, str | None]:
+from typing import Optional
+
+def debug_filters(text: str) -> tuple[bool, Optional[str]]:
     """Debug helper that returns whether text passes and the first rule name that failed."""
     if not text or len(text.strip()) == 0:
         return False, "empty_text"

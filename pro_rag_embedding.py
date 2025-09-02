@@ -21,7 +21,8 @@ def _char_vector(text: str) -> np.ndarray:
 async def embed_sentence(text: str) -> np.ndarray:
     """Return a normalized embedding for given text."""
     vec = _char_vector(text).astype(np.complex64)
-    return await asyncio.to_thread(_project, vec)
+    from compat import to_thread
+    return await to_thread(_project, vec)
 
 
 def _project(vec: np.ndarray) -> np.ndarray:

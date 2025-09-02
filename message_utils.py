@@ -1,3 +1,4 @@
+from compat import to_thread
 import asyncio
 from typing import Dict, Iterable
 
@@ -19,7 +20,7 @@ async def build_analog_map(tokens: Iterable[str]) -> Dict[str, str]:
         suggestions = await pro_predict.suggest_async(tok, topn=1)
         analog = suggestions[0] if suggestions else None
         if not analog:
-            analog = await asyncio.to_thread(pro_predict.lookup_analogs, tok)
+            analog = await to_thread(pro_predict.lookup_analogs, tok)
         if analog:
             async with lock:
                 analog_map[tok] = analog

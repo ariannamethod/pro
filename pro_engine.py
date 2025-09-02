@@ -938,8 +938,11 @@ class ProEngine:
             diff_first, diff_second = self._semantic_diff_sequence(
                 [first_words, second_words]
             )
-            sentence1 = " ".join(diff_first) + "."
-            sentence2 = " ".join(diff_second) + "."
+            # Убираем <s> токены из финального ответа
+            clean_first = [w for w in diff_first if w != "<s>"]
+            clean_second = [w for w in diff_second if w != "<s>"]
+            sentence1 = " ".join(clean_first) + "."
+            sentence2 = " ".join(clean_second) + "."
             response = sentence1 + " " + sentence2
             for tok, analog in analog_map.items():
                 pattern = re.compile(rf"\b{re.escape(tok)}\b", re.IGNORECASE)

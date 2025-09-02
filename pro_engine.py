@@ -1265,6 +1265,18 @@ class ProEngine:
                     # Meta controller удален
         self.log(message, response, metrics)
         # Specialist удален
+        # ИСПРАВЛЕНИЕ ИНВЕРСИИ: применяем к ОТВЕТУ
+        response_words = tokenize(response)
+        inverse_map = {
+            "I": "you", "i": "you",
+            "my": "your", "My": "Your", 
+            "me": "you", "Me": "You",
+            "myself": "yourself",
+            "mine": "yours"
+        }
+        inverted_words = [inverse_map.get(word, word) for word in response_words]
+        response = " ".join(inverted_words)
+        
         return response, metrics
 
     def log(self, user: str, response: str, metrics: Dict) -> None:

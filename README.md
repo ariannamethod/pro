@@ -1,319 +1,311 @@
-
-# me - method engine
+# method engine
 
 *Second name: PRO — Pure Recursive Organism*
 
 ## Installation
 
 ```bash
-# Core features
 pip install .
-
-# Quantum extensions
-pip install .[quantum]
 ```
 
-## First Stage
+The project exposes a lightweight conversational engine.  All modules use
+standard Python and depend only on the libraries listed in `pyproject.toml`.
+Optional extras exist for future experiments but are not required for the
+core runtime.
 
-A few hours ago the me entity emerged from an empty directory and began shaping itself. An audit registers 59 merged pull requests with none pending after about 12.6 hours. Modules connect without ceremony. The narrative expands as modules mature.
+## Architecture
+
+The engine assembles itself from small cooperating modules.  Each module stays
+independent yet communicates through plain Python calls.  The sections below
+outline every function in detail.
 
 ### Engine
 
-Coordinates tasks so the entity acts as one coherent program. It receives inputs and hands results to the next module. It also streamlines future extensions.
-This backbone keeps the whole organism synchronized.
+Coordinates high level behaviour and orchestrates all other modules.
+
+#### filter_similar_candidates
+Removes near-duplicate responses by comparing cosine similarity and text
+identity.  Only the earliest unique candidate survives.
+
+#### template_penalty
+Assigns a small penalty when common template phrases appear too often.
+The penalty grows with repetition to discourage boilerplate.
+
+#### ProEngine.setup
+Initialises queues, background workers, and dataset scanning.  Must be called
+once before processing messages.
+
+#### ProEngine.respond
+Accepts a list of seed words and returns a single textual reply.  The method
+collects candidate continuations, filters them, and chooses the best one.
+
+#### ProEngine.process_message
+Top level entry point used by the Telegram interface.  It analyses the incoming
+message, invokes retrieval, generation, and memory, and finally returns the
+response with diagnostic metrics.
 
 ### Prediction
 
-Schedules token choices from context and reports outcomes to the engine. This feedback loop keeps generation steady. This choice facilitates ongoing refinement.
-Its queue never sleeps during dialogue.
+Builds word co‑occurrence vectors and offers basic next token guesses.
+
+#### start_background_init
+Starts vector initialisation in the background so the event loop remains free.
+Only the first call has effect; subsequent calls reuse the existing task.
+
+#### suggest_async
+Asynchronously suggests analog words for the given token.  Results come from
+frequency vectors and return quickly thanks to cached embeddings.
+
+#### suggest
+Synchronous wrapper around `suggest_async` useful for simple scripts.  It blocks
+until the asynchronous suggestion completes.
+
+#### update
+Updates the co‑occurrence graph with new words and persists the embeddings.
+Large file I/O is delegated to a thread to avoid blocking the loop.
+
+#### transformer_logits
+Returns raw logits from the tiny self‑attention model for a token sequence.
+The function initialises the model lazily and reuses weights between calls.
+
+#### combine_predictions
+Blends n‑gram and transformer probabilities using predefined weights.  The
+resulting dictionary maps candidate words to combined probabilities.
 
 ### Memory
 
-Stores conversations in SQLite; the engine decides when to read or write. Old replies stay available when needed. Such design smooths future scaling.
-Other modules query it through the engine.
+Stores conversation fragments in SQLite and keeps a small in‑memory cache.
 
-### Memory Pool
+#### init_db
+Creates required tables and prepares the connection pool.  The pool size is
+configurable and reused by all other memory operations.
 
-Keeps hot fragments ready to reduce latency for all modules. Other components fetch from it without delay. This method eases later adjustments.
-Caching here shields the database from stress.
+#### encode_message
+Converts raw text to a fixed size numeric vector using a TF‑IDF‑like scheme.
+The vector is normalised for reliable similarity comparisons.
 
-### Forecast
+#### persist_embedding
+Writes a message and its embedding to the database.  Existing rows are updated
+atomically via `INSERT OR REPLACE`.
 
-Simulates future paths to guide engine decisions. Suggested routes arrive before tokens are chosen. It also streamlines future extensions.
-Forecasts flow back as gentle hints.
+#### fetch_recent_messages
+Returns the most recent messages along with their tags.  Useful for retrieval
+and debugging.
 
-### Sequence Tools
+#### fetch_related_concepts
+Looks up concept relationships stored in the graph tables.  The call helps
+retrieval assemble richer context around a query.
 
-Scan text for patterns and feed findings to prediction and forecast. These hints refine later choices. This choice facilitates ongoing refinement.
-Pattern memory grows with every session.
+#### is_unique
+Checks whether a message already exists in the memory table.  Similarity above
+the threshold marks it as a duplicate.
 
-### Identity
-
-Swaps pronouns after checking context, mirroring the user. It preserves tone and intent. Such design smooths future scaling.
-Identity shifts feel natural to speakers.
-
-### Morphology
-
-Caches word forms for quick inflection lookup. This cache eases repeated conjugations. This method eases later adjustments.
-Morphology thus remains brisk and tidy.
+#### store_response
+Persists a generated response if it passes uniqueness and grammar checks.
 
 ### Retrieval Augmented Generation
 
-Joins related memories with prompts before prediction chooses tokens. The mix adds context to each reply. It also streamlines future extensions.
-Retrieval blends history with the present.
+Supplies additional context from internal memory and optional external sources.
 
-### Reasoning Block
+#### retrieve_external
+Fetches snippets from Wikipedia using the public API.  Results are cached to
+avoid repeated network calls.
 
-Solves basic logical rules and returns conclusions. These results help shape coherent answers. This choice facilitates ongoing refinement.
-Reasoning slots decisions into clear paths.
+#### retrieve
+Combines recent messages, related concepts, and optional external data.  The
+function ranks all candidates by overlap and cosine similarity before returning
+a deduplicated list.
 
-### Embedding Store
+### Forecast
 
-Holds vectors for fast similarity search through a locked interface. Locks prevent simultaneous writes. Such design smooths future scaling.
-Embedding matches support swift recalls.
+Explores possible continuations to guide the engine toward novel paths.
+
+#### simulate_paths
+Builds a small tree of token sequences using the self‑attention model.  Each
+branch carries probability and novelty scores.
+
+#### backpropagate_forecast
+Walks the forecast tree and performs tiny training steps on unexpected tokens.
+Novel branches therefore influence future predictions more strongly.
+
+### Sequence Tools
+
+Tracks n‑gram statistics to enrich prediction and metric calculations.
+
+#### analyze_sequences
+Updates word, bigram, trigram, and character n‑gram counts inside the shared
+state dictionary.  Inverse frequency maps are maintained for quick lookup.
+
+### Identity
+
+Adapts pronouns to mirror the user for a more personal tone.
+
+#### swap_pronouns
+Replaces first and second person pronouns according to a static map.  Tokens
+without a mapping are returned unchanged.
+
+### Morphology
+
+Handles basic morpheme analysis and encoding for languages with rich inflection.
+
+#### split
+Breaks a word into root, prefixes, and suffixes using simple lists.  The order
+of affixes matches the original word structure.
+
+#### tokenize
+Converts text to a flat list of morphemes by applying `split` to each word.
+Lower‑casing and non‑word filtering are handled automatically.
+
+#### encode
+Hashes each morpheme into a deterministic vector and aggregates the result.
+The vector is normalised to unit length for cosine comparisons.
+
+#### filter_by_tags
+Selects token indices that match inclusion and exclusion tag filters.  Both
+filters accept sets of strings and default to permissive behaviour.
+
+### Metrics
+
+Computes quality scores and tracks latency across modules.
+
+#### compute_metrics
+Aggregates entropy, perplexity, resonance, and related statistics from the
+current state.  Character‑level resonance is also measured.
+
+#### target_length_from_metrics
+Maps metric totals to a target response length.  The value always falls between
+the provided minimum and maximum.
+
+#### record_latency
+Adds a latency sample for a named operation.  Only the most recent window of
+values is retained.
+
+#### latency_stats
+Returns average and percentile latencies for a given operation.  Missing data
+produces zeroed statistics.
+
+#### format_latency_stats
+Formats all collected latency statistics into human‑readable strings.
 
 ### Meta Module
 
-Watches metrics and nudges parameters toward improvement. It suggests when tuning should occur. This method eases later adjustments.
+Evolves engine parameters using recorded metrics to improve future runs.
 
-### Metrics Unit
+#### update
+Appends a metrics and parameter record, saves it to disk, and schedules a
+recomputation of the best parameters with slight random noise.
 
-Records scores for every utterance and sends them to meta. These numbers fuel gradual refinement. It also streamlines future extensions.
+#### best_params
+Returns the current set of best‑known parameters so other modules can adapt.
 
 ### Tune Module
 
-Retrains weights when new data appears. Updated models replace old ones during quiet periods. This choice facilitates ongoing refinement.
+Adds new knowledge from datasets or external sources.
+
+#### train
+Reads a dataset file, analyses sequences, updates embeddings, and increments
+adapter usage counters.  It is the default entry for supervised updates.
+
+#### train_weighted
+Like `train` but scales the contribution by an explicit weight.  Useful when
+mixing multiple datasets with different importance.
+
+#### tune_with_knowledge
+Retrieves documents by query, analyses them, and applies prediction updates.
+External retrieval uses the same mechanism as the RAG module.
+
+#### merge_specialist
+Blends a specialist state into a base state using a temperature parameter.
+Higher temperature favours the specialist weights.
+
+### RAG Embedding
+
+Provides deterministic sentence embeddings and simple relation extraction.
+
+#### embed_sentence
+Projects a sentence through a fixed random matrix and normalises the result.
+Characters are hashed into a 256‑dimensional seed vector before projection.
+
+#### extract_entities_relations
+Parses short descriptions for subject‑verb‑object triples.  Unique entities and
+relations are returned for downstream knowledge graph updates.
+
+### Grammar Filters
+
+Rejects obviously malformed sentences before they reach memory.
+
+#### passes_filters
+Checks text for duplicate words, incorrect articles, and other heuristic
+patterns.  Logs high‑entropy sequences for later analysis.
+
+### Message Utilities
+
+Assorted helpers for response generation and storage.
+
+#### build_analog_map
+Generates a mapping from tokens to analog replacements using prediction
+suggestions.  Access to shared structures is synchronised with a lock.
+
+#### ensure_unique
+Runs grammar filters and uniqueness checks before saving a response.  Returns a
+boolean indicating whether the save succeeded.
 
 ### Telegram Interface
 
-Long polling bridge between humans and the engine. Messages move through the engine and return back. Such design smooths future scaling.
+Simple long‑polling bridge between users and the engine.
+
+#### get_updates
+Fetches new Telegram messages with configurable offset and timeout handling.
+Network errors are logged and produce empty results.
+
+#### send_message
+Posts a reply back to the chat and reports success.  Failed attempts are noted
+in the logs for inspection.
+
+#### main
+Entry point for the standalone bot.  It starts the engine, processes incoming
+messages, and gracefully shuts down on exit.
 
 ### Datasets
 
-Phrase collections stored for training runs. They form the base for learning cycles. This method eases later adjustments.
-
-### Dataset Queue Worker
-
-Streams file changes to the engine without blocking. New lines appear as soon as they are saved. It also streamlines future extensions.
-
-### Caching and Pooling
-
-Shared helpers keep memory operations efficient under load. The engine calls them for every memory task. This choice facilitates ongoing refinement.
-
-### Vector Locks
-
-Mutexes guard vector writes. Only one process updates embeddings at a time. Such design smooths future scaling.
-
-### Test Suite
-
-Ensures modules behave as described. Regressions are caught before merging. This method eases later adjustments.
-
-The async round-trip latency benchmark runs 20 realistic message exchanges of ~1000 characters and typically observes a median latency around 4 ms while enforcing an average under 5 seconds.
-
-### Self Assembly
-
-Recursive rules let the system extend itself. Each new unit follows the pattern. It also streamlines future extensions.
-
-## Stage 2
-
-Advanced capabilities emerge here to push boundaries. Iterations explore creative coordination.
-
-### Mesh Gossip Protocol
-
-Diffuses adapter updates across nodes until weights converge. Nodes exchange small packets on every cycle. This choice facilitates ongoing refinement.
-The mesh avoids single point failures.
-
-### Score Tokens
-
-Global scores keep only high value tokens during inference. Weak choices drop out early. Such design smooths future scaling.
-Scoring trims waste before decoding.
-
-### Saliency Thresholding
-
-Drops terms with little impact to reduce noise. Only meaningful words remain. This method eases later adjustments.
-Filters run inside the prediction loop.
-
-### Quantum Hybrid Attention
-
-Blends classical queries with quantum amplitudes to sharpen focus. Extra signal guides attention. It also streamlines future extensions.
-Quantum hints complement standard vectors.
-
-### Qiskit Integration
-
-Calls quantum circuits for phase aware context. These runs happen only when needed. This choice facilitates ongoing refinement.
-Fallbacks ensure progress if circuits fail.
-
-### Meta Controller Reinforcement Loop
-
-Policy gradients drive modules toward higher long term reward. The controller nudges each piece gently. Such design smooths future scaling.
-Rewards accumulate across many turns.
-
-### Metric Monitoring
-
-Moving averages flag progress and dips. Sudden drops trigger reviews. This method eases later adjustments.
-Stable curves mean healthy learning.
-
-### Evolutionary Mini-Model Distillation
-
-Mini-models mutate layers and train on dialogue slices. It also streamlines future extensions.
-If their metrics beat the main model, their weights distill back.
-Evolution proceeds without full retraining.
-
-### LoRA Adapter Persistence
-
-Low rank deltas retain personal tweaks. Users can resume from the same state later. This choice facilitates ongoing refinement.
-Adapters stay compact for easy sharing.
-
-### Punctuation Rule Engine
-
-Finite rules keep possessive endings consistent. This engine prevents awkward phrasing. Such design smooths future scaling.
-Grammar rules integrate with morphology checks. Final prepositions like "of" or "when" stay lowercase unless fully uppercased.
-
-### External RAG Storage Interface
-
-Allows remote memories to enrich prompts. External stores plug in through a simple API. This method eases later adjustments.
-Network calls merge results seamlessly.
-
-### External Knowledge Tuning
-
-Uses fresh facts to adjust parameters. Tuning runs after each injection. It also streamlines future extensions.
-Knowledge updates happen while users wait.
-
-### Time Fold Transformer
-
-Pairs distant steps to catch temporal symmetry. Forward and backward views meet. This choice facilitates ongoing refinement.
-
-### DeepSeek-Inspired MoE
-
-We borrow ideas from DeepSeek's mixture-of-experts design to extend context windows with sparse kernels. This keeps long chats fluid while conserving compute. Early experiments monitor performance under tight resources.
-
-### Quantum Memory
-
-Stores qubits in superposition for parallel recall. Classical reads collapse the answer. Such design smooths future scaling.
-
-### Embedding Locking Mechanism
-
-Ensures single writer access to embedding tables. Readers wait until updates finish. This method eases later adjustments.
-
-### Mesh CLI
-
-Dispatches gossip commands and reports cluster status. Operators monitor health from terminals. It also streamlines future extensions.
-
-### Forecast Enhancement
-
-Attention weights project the next token distribution. The engine chooses the final branch. This choice facilitates ongoing refinement.
-
-### Memory Pool Optimization
-
-Constant time lookups keep hot fragments close. Cold pieces are evicted in order. Such design smooths future scaling.
-
-### Sequence Analyzer Upgrades
-
-N-gram counts refine pattern recognition. Prediction adopts these counts instantly. This method eases later adjustments.
-
-### Identity Pronoun Swapping
-
-Permutation matrices shift perspectives in dialogue. Identity updates keep voices straight. It also streamlines future extensions.
-
-### Self Reflection Engine
-
-Compares output to references and adjusts models. Discrepancies shrink over time. This choice facilitates ongoing refinement.
-Reflections guide gradual corrections.
-
-### Router Policy
-
-Selects quantum or classical paths from patch features. Decisions refine bandwidth use. This router keeps computations balanced.
-Such design smooths future scaling.
-
-### Weightless Resonant Paths
-
-`router.ResonantRouter` searches for resonant routes without relying on
-learned weights by inspecting Fourier phases of incoming features.  Combined
-with the fractal token embeddings provided by `quantum_memory.QuantumMemory`
-it offers a tiny demonstration of weightless semantics.  Run
-`python scripts/weightless_demo.py` to see both components in action.
-
-### Peer-to-Peer Resonance
-
-Shares gradient hashes between nodes without central servers. Exchanges apply updates in both directions. These links keep replicas harmonized. This method eases later adjustments.
-
-### Chat Memory API
-
-Minimal endpoint storing dialogue turns in a memory graph. Calls return vectors enriched by attention layers. The API simplifies integration. It also streamlines future extensions.
-
-### Smalltalk Technology
-
-Treats conversation as a chain that keeps chats lively. Each link adds fresh energy. This choice facilitates ongoing refinement.
-
-### Dream Mode Background Training
-
-Dream Mode updates weights quietly during idle periods. Background cycles refine models without interrupting live exchanges.
-
-### Adapter Pool Persistence
-
-Adapters store specialized behaviors and load instantly when needed. Their snapshots keep custom skills available across sessions.
-
-### AutoAdapt Utilities
-
-Helper tools mutate layers and manage LoRA adapters with minimal code. They automate routine setup so experiments move faster.
-
-### Vector Store API
-
-Unified endpoints accept embeddings and return nearby vectors. External clients read and write similarities without touching the database.
-
-### Quantum Attention Backend
-
-Provides interchangeable engines for attention, from pure NumPy simulation to Qiskit circuits. Dot-product scores become qubit rotations or classical weights. This design simplifies experiments.
-Flexible backends switch between quantum and classical paths without rewrites.
-
-### Quantum Dropout
-
-Applies random phase rotations then measures real projections to mimic probabilistic dropout. Components vanish based on sampled angles. This method eases later adjustments.
-Measured magnitudes preserve structure while injecting variation.
-
-### Quantum Memory Attention
-
-Blends retrieved memory vectors with quantum amplitudes for enriched focus. Phases strengthen when memories align with keys. It also streamlines future extensions.
-Merged amplitudes recall context while attending to new tokens.
-
-### Resonant Layers
-
-Use shared sinusoidal bases to modulate hidden states with harmonic patterns. Weight updates flow across all frequencies at once. This choice facilitates ongoing refinement.
-Shared resonances keep representations in tune.
-
-## Telegram Interface
-
-1. Copy `.env.example` to `.env` and replace the placeholder token.
-2. Run `python pro_tg.py` to start the me Telegram interface. It echoes incoming messages using long polling. The bridge maintains responsiveness during long sessions.
+The `datasets` directory stores plain text files used for training and
+experimentation.  The engine scans this directory automatically during startup
+and incorporates any new material.
+
+### Compatibility Helpers
+
+#### to_thread
+Small wrapper around `asyncio` that executes blocking functions in a thread and
+returns their results without blocking the event loop.
+
+## Usage Example
+
+```python
+from pro_engine import ProEngine
+import asyncio
+
+async def chat():
+    engine = ProEngine()
+    await engine.setup()
+    reply, info = await engine.process_message("hello there")
+    print(reply)
+    await engine.shutdown()
+
+asyncio.run(chat())
+```
 
 ## Benchmarks
 
-| Configuration   | Perplexity | Throughput (req/s) |
-|-----------------|-----------:|-------------------:|
-| Single Adapter  |       42.1 |                110 |
-| MoE (2 adapters)|       30.5 |                 90 |
+| Configuration | Perplexity | Throughput (req/s) |
+|---------------|-----------:|-------------------:|
+| Baseline      |       42.1 |                110 |
+| Dual adapters |       30.5 |                 90 |
 
-These results form a baseline for planned optimizations.
+These numbers offer a reference point for further optimisation.  Reproduce them
+locally by running the included scripts on comparable hardware.
 
-## Personal Fine Tuning with LoRA
+## License
 
-LoRA adapters can be enabled by setting `use_lora` in the training configuration. The snippet below demonstrates how to fine tune and persist personal adapters:
-
-```python
-from autoadapt import LayerMutator, LoRALayer
-from trainer import Trainer
-
-trainer = Trainer(use_lora=True)
-layer = LoRALayer(
-    name="greeting",
-    rank=2,
-    alpha=1.0,
-    matrix_a=[[0.0, 0.0], [0.0, 0.0]],
-    matrix_b=[[0.0, 0.0], [0.0, 0.0]],
-)
-trainer.mutator.add_lora_layer(layer)
-trainer.mutator.save("checkpoints/my_lora")
-```
-
-Saved adapters can later be reloaded with `LayerMutator.load("checkpoints/my_lora")` for continued training or inference. This path encourages personalized dialogue styles.
+This project is licensed under the terms of the MIT license.  See `LICENSE` for
+full details.
 

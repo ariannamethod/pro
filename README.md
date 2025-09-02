@@ -306,6 +306,6 @@ locally by running the included scripts on comparable hardware.
 
 ## License
 
-This project is licensed under the terms of the MIT license.  See `LICENSE` for
-full details.
+This project is licensed under the terms of the GNU General Public License v3.0.
+See `LICENSE` for full details.  Copyright (C) 2024 Oleg Ataeff and Arianna Method.
 

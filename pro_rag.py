@@ -93,32 +93,18 @@ async def retrieve(
     qvec = _sentence_vector(qwords)
     scored: List[tuple[float, str]] = []
 
-    if lattice is not None:
-        # Use embeddings stored in the lattice and include neighbouring nodes
-        for did, nodes in lattice.graph.items():
-            for idx, node in enumerate(nodes):
-                sim = _cosine(qvec, node.embedding) if qvec else 0.0
-                if sim <= 0:
-                    continue
-                scored.append((sim, node.text))
-                # incorporate structural neighbours from the dialogue graph
-                if idx > 0:
-                    scored.append((sim * 0.5, nodes[idx - 1].text))
-                if idx + 1 < len(nodes):
-                    scored.append((sim * 0.5, nodes[idx + 1].text))
-        scored.sort(key=lambda x: x[0], reverse=True)
-    else:
-        # Fall back to recent messages from the database
-        messages = await pro_memory.fetch_recent_messages(50)
-        qset = set(qwords)
-        for msg, _ in messages:
-            words = lowercase(tokenize(msg))
-            word_score = len(qset.intersection(words))
-            mvec = _sentence_vector(words)
-            score = word_score + (_cosine(qvec, mvec) if qvec and mvec else 0)
-            if score > 0:
-                scored.append((score, msg))
-        scored.sort(key=lambda x: x[0], reverse=True)
+    # lattice удален - используем прямой поиск по памяти
+    # Fall back to recent messages from the database
+    messages = await pro_memory.fetch_recent_messages(50)
+    qset = set(qwords)
+    for msg, _ in messages:
+        words = lowercase(tokenize(msg))
+        word_score = len(qset.intersection(words))
+        mvec = _sentence_vector(words)
+        score = word_score + (_cosine(qvec, mvec) if qvec and mvec else 0)
+        if score > 0:
+            scored.append((score, msg))
+    scored.sort(key=lambda x: x[0], reverse=True)
 
     graph_task = asyncio.create_task(pro_memory.fetch_related_concepts(qwords))
     external: List[str] = []

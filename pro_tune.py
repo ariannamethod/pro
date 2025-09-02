@@ -6,7 +6,7 @@ import asyncio
 from typing import Dict, List, Optional
 
 from pro_metrics import tokenize, lowercase
-# pro_sequence удален
+import pro_sequence
 import pro_predict
 import pro_memory
 from pro_rag import retrieve_external
@@ -16,7 +16,8 @@ _SEP = '\u0001'
 
 
 def train_weighted(
-    state: Dict, dataset_path: str, weight: float, adapters: Optional[List[str]] = None
+    state: Dict, dataset_path: str, weight: float, adapters: Optional[List[str]] = None,
+    message_metrics: Optional[Dict] = None
 ) -> Dict:
     if weight <= 0:
         logging.warning(
@@ -28,8 +29,45 @@ def train_weighted(
             "Dataset path %s does not exist; skipping training", dataset_path
         )
         return state
+    # Умная загрузка - случайный участок + семантический поиск
+    file_size = os.path.getsize(dataset_path)
+    texts = []
+    
+    # 1. Случайный участок на основе метрик
     with open(dataset_path, 'r', encoding='utf-8') as fh:
-        text = fh.read()
+        if message_metrics:
+            # Размер участка зависит от энтропии сообщения
+            entropy = message_metrics.get('entropy', 0.5)
+            perplexity = message_metrics.get('perplexity', 1.0)
+            
+            # Чем больше энтропия - тем больше участок (больше разнообразия)
+            chunk_size = int(1000 + entropy * 2000)  # 1000-3000 символов
+            
+            # Позиция зависит от перплексии (заряженности)
+            position_factor = (perplexity % 1.0)  # 0.0 - 1.0
+            max_start = max(0, file_size - chunk_size)
+            start_pos = int(max_start * position_factor)
+        else:
+            # Без метрик - случайный участок
+            import random
+            chunk_size = random.randint(800, 1200)
+            max_start = max(0, file_size - chunk_size)
+            start_pos = random.randint(0, max_start)
+        
+        fh.seek(start_pos)
+        random_text = fh.read(chunk_size)
+        if random_text.strip():
+            texts.append(random_text)
+    
+    # 2. Семантический поиск (если есть метрики с исходными словами)
+    if message_metrics and 'words' in message_metrics:
+        query_words = message_metrics['words']
+        # Синхронная версия семантического поиска
+        semantic_chunks = _find_semantic_chunks_sync(dataset_path, query_words, num_chunks=1)
+        texts.extend(semantic_chunks)
+    
+    # Объединяем все тексты
+    text = " ".join(texts) if texts else ""
     if not text:
         logging.warning(
             "Dataset path %s is empty; skipping training", dataset_path
@@ -49,9 +87,54 @@ def train_weighted(
 
 
 def train(
-    state: Dict, dataset_path: str, adapters: Optional[List[str]] = None
+    state: Dict, dataset_path: str, adapters: Optional[List[str]] = None,
+    message_metrics: Optional[Dict] = None
 ) -> Dict:
-    return train_weighted(state, dataset_path, 1.0, adapters)
+    return train_weighted(state, dataset_path, 1.0, adapters, message_metrics)
+
+
+def _find_semantic_chunks_sync(
+    dataset_path: str, query_words: List[str], num_chunks: int = 2, chunk_size: int = 1000
+) -> List[str]:
+    """Найти семантически релевантные куски датасета (синхронная версия)."""
+    if not os.path.exists(dataset_path):
+        return []
+    
+    with open(dataset_path, 'r', encoding='utf-8') as fh:
+        full_text = fh.read()
+    
+    # Разбиваем на куски
+    chunks = []
+    for i in range(0, len(full_text), chunk_size // 2):  # с перекрытием
+        chunk = full_text[i:i + chunk_size]
+        if chunk.strip():
+            chunks.append(chunk)
+    
+    if not chunks:
+        return []
+    
+    # Ищем наиболее релевантные куски
+    query_set = set(w.lower() for w in query_words)
+    scored_chunks = []
+    
+    for chunk in chunks:
+        chunk_words = set(w.lower() for w in lowercase(tokenize(chunk)))
+        # Семантическая близость = пересечение слов
+        overlap = len(query_set & chunk_words)
+        if overlap > 0:
+            scored_chunks.append((overlap, chunk))
+    
+    # Возвращаем топ куски
+    scored_chunks.sort(key=lambda x: x[0], reverse=True)
+    return [chunk for _, chunk in scored_chunks[:num_chunks]]
+
+
+async def find_semantic_chunks(
+    dataset_path: str, query_words: List[str], num_chunks: int = 2, chunk_size: int = 1000
+) -> List[str]:
+    """Найти семантически релевантные куски датасета (асинхронная версия)."""
+    from compat import to_thread
+    return await to_thread(_find_semantic_chunks_sync, dataset_path, query_words, num_chunks, chunk_size)
 
 
 async def tune_with_knowledge(
@@ -65,7 +148,8 @@ async def tune_with_knowledge(
     words = lowercase(tokenize(text))
     pro_sequence.analyze_sequences(state, words, weight=weight)
     await pro_predict.update(words)
-    await asyncio.to_thread(
+    from compat import to_thread
+    await to_thread(
         pro_predict.save_embeddings, pro_predict._GRAPH, pro_predict._VECTORS
     )
     return state

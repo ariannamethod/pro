@@ -19,20 +19,6 @@ YOUR_YOU_RE = re.compile(r"\byour you\b", re.IGNORECASE)
 I_TO_RE = re.compile(r"\bi to\b(?! \w*(ing|ed|go|see|be|do|have|get|come|want))", re.IGNORECASE)
 I_MISSING_VERB_RE = re.compile(r"\bi (the|a|an|to|of|in|on|at|by|with|for)\b", re.IGNORECASE)
 
-# Pronoun clustering patterns --------------------------------------------
-PRONOUN_CLUSTER_RE = re.compile(r"\b(you|he|she|we|they|i)\s+(you|he|she|we|they|i)\b", re.IGNORECASE)
-PRONOUN_THE_RE = re.compile(r"\b(you|he|she|we|they|i)\s+the\s+(you|he|she|we|they|i)\b", re.IGNORECASE)
-
-# Short cycle and token patterns -----------------------------------------
-SHORT_CYCLE_RE = re.compile(r"\b(i|a|the)\s*\.\s*(i|a|the)\s*\.\s*(i|a|the)\b", re.IGNORECASE)
-S_TOKEN_RE = re.compile(r"<s>")
-SINGLE_CHAR_SENTENCE_RE = re.compile(r"\b\w\s*\.\s*\w\s*\.\s*\w\b")
-
-# Recursion and unknown name patterns ------------------------------------
-RECURSION_PATTERN_RE = re.compile(r"\b(i|the|a)\s+(i|the|a)\s*\.\s*(i|the|a)\b", re.IGNORECASE)
-UNKNOWN_NAME_PATTERN_RE = re.compile(r"\b(i|the|a)\s+[A-Z][a-z]+\s*\.\s*(i|the|a)\b")
-TRIPLE_REPEAT_RE = re.compile(r"\b(\w+)\s+\1\s+\1\b", re.IGNORECASE)
-
 DUP_WHITELIST = {"go", "no", "yeah"}
 VERB_SET = {
     "is",
@@ -97,25 +83,6 @@ def passes_filters(text: str) -> bool:
         return False
     if I_MISSING_VERB_RE.search(text):
         return False
-    # Проверяем скопление местоимений
-    if PRONOUN_CLUSTER_RE.search(text):
-        return False
-    if PRONOUN_THE_RE.search(text):
-        return False
-    # Блокируем короткие циклы и служебные токены
-    if SHORT_CYCLE_RE.search(text):
-        return False
-    if S_TOKEN_RE.search(text):
-        return False
-    if SINGLE_CHAR_SENTENCE_RE.search(text):
-        return False
-    # Блокируем рекурсивные паттерны
-    if RECURSION_PATTERN_RE.search(text):
-        return False
-    if UNKNOWN_NAME_PATTERN_RE.search(text):
-        return False
-    if TRIPLE_REPEAT_RE.search(text):
-        return False
     for m in DUP_WORD_RE.finditer(text):
         word = m.group(1).lower()
         if word in DUP_WHITELIST:
@@ -136,4 +103,12 @@ def passes_filters(text: str) -> bool:
         _log("ending-preposition", m.group(0).split())
     if TO_SEQ_RE.search(text):
         _log("to-sequence", TO_SEQ_RE.search(text).group(0).split())
+    # Проверка против повторов слов
+    if WORD_REPEAT_RE.search(text):
+        return False
+    
     return True
+
+
+# Правило против повторов слов  
+WORD_REPEAT_RE = re.compile(r"\b(you|the|a|an|i|we|they|he|she|it)\s+\1\b", re.IGNORECASE)

@@ -127,7 +127,7 @@ async def execute_cached(
         return cached[1]
     async with get_connection() as conn:
         async with conn.execute(query, params_tuple) as cur:
-            rows = await cur.fetchall()
+                rows = await cur.fetchall()
     _CACHE[key] = (now + ttl, rows)
     return rows
 
@@ -208,7 +208,7 @@ async def is_unique_message(content: str, threshold: float = 0.85, tag: str = "m
     # Упрощенная версия - всегда уникально
     await build_index()
     embedding = await encode_message(content)
-    
+
     # Сохраняем
     await persist_embedding(content, embedding, tag, fingerprint)
     _add_to_index(content, embedding)

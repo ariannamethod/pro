@@ -1268,14 +1268,26 @@ class ProEngine:
         # ИСПРАВЛЕНИЕ ИНВЕРСИИ: применяем к ОТВЕТУ
         response_words = tokenize(response)
         inverse_map = {
-            "I": "you", "i": "you",
+            "you": "I", "You": "I",
             "my": "your", "My": "Your", 
             "me": "you", "Me": "You",
             "myself": "yourself",
             "mine": "yours"
         }
         inverted_words = [inverse_map.get(word, word) for word in response_words]
-        response = " ".join(inverted_words)
+        # СТАРАЯ ИНВЕРСИЯ БЕЗ ПУНКТУАЦИИ
+        # response = " ".join(inverted_words)
+        
+        # НОВАЯ ИНВЕРСИЯ С ПУНКТУАЦИЕЙ
+        import re
+        words_with_punct = re.findall(r'\w+|[^\w\s]', response)
+        inverted_parts = []
+        for part in words_with_punct:
+            if part.isalpha():
+                inverted_parts.append(inverse_map.get(part, part))
+            else:
+                inverted_parts.append(part)
+        response = "".join(inverted_parts)
         
         return response, metrics
 

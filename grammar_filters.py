@@ -14,9 +14,6 @@ ARTICLE_PRONOUN_RE = re.compile(
     r"\b(the|a)\s+(he|she|they|it)\b", re.IGNORECASE
 )
 
-# S token блокировка - ДОБАВЛЯЮ САМОЕ ВАЖНОЕ!
-S_TOKEN_RE = re.compile(r"<s>", re.IGNORECASE)
-
 DUP_WHITELIST = {"go", "no", "yeah"}
 VERB_SET = {
     "is",
@@ -65,10 +62,6 @@ def _log(pattern: str, match: Iterable[str]) -> None:
 
 def passes_filters(text: str) -> bool:
     """Return True if ``text`` passes grammar filters."""
-
-    # ДОБАВЛЯЮ ПРОВЕРКУ S TOKEN - ГЛАВНАЯ ПРОБЛЕМА!
-    if S_TOKEN_RE.search(text):
-        return False
 
     if ARTICLE_PAIR_RE.search(text):
         return False

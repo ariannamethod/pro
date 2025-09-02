@@ -14,6 +14,11 @@ ARTICLE_PRONOUN_RE = re.compile(
     r"\b(the|a)\s+(he|she|they|it)\b", re.IGNORECASE
 )
 
+# Smart grammar patterns -------------------------------------------------
+YOUR_YOU_RE = re.compile(r"\byour you\b", re.IGNORECASE)
+I_TO_RE = re.compile(r"\bi to\b(?! \w*(ing|ed|go|see|be|do|have|get|come|want))", re.IGNORECASE)
+I_MISSING_VERB_RE = re.compile(r"\bi (the|a|an|to|of|in|on|at|by|with|for)\b", re.IGNORECASE)
+
 DUP_WHITELIST = {"go", "no", "yeah"}
 VERB_SET = {
     "is",
@@ -56,7 +61,7 @@ SENTENCE_END_PREP_RE = re.compile(
 TO_SEQ_RE = re.compile(r"\bto \w+ to \w+\b", re.IGNORECASE)
 
 
-def _log(pattern: str, match: Iterable[str]) -> None:
+def _log(pattern: str, match) -> None:
     logging.info("High-entropy pattern %s: %s", pattern, " ".join(match))
 
 
@@ -70,6 +75,13 @@ def passes_filters(text: str) -> bool:
     if MID_SENTENCE_CAP_THE_RE.search(text):
         return False
     if ARTICLE_PRONOUN_RE.search(text):
+        return False
+    # Новые умные правила
+    if YOUR_YOU_RE.search(text):
+        return False
+    if I_TO_RE.search(text):
+        return False
+    if I_MISSING_VERB_RE.search(text):
         return False
     for m in DUP_WORD_RE.finditer(text):
         word = m.group(1).lower()

@@ -1275,19 +1275,7 @@ class ProEngine:
             "mine": "yours"
         }
         inverted_words = [inverse_map.get(word, word) for word in response_words]
-        # СТАРАЯ ИНВЕРСИЯ БЕЗ ПУНКТУАЦИИ
-        # response = " ".join(inverted_words)
-        
-        # НОВАЯ ИНВЕРСИЯ С ПУНКТУАЦИЕЙ
-        import re
-        words_and_punct = re.findall(r'\w+|[^\w\s]', response)
-        inverted_parts = []
-        for part in words_and_punct:
-            if part.isalpha():
-                inverted_parts.append(inverse_map.get(part, part))
-            else:
-                inverted_parts.append(part)
-        response = "".join(inverted_parts)
+        response = " ".join(inverted_words)
         
         return response, metrics
 

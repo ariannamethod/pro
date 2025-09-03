@@ -13,6 +13,8 @@ MID_SENTENCE_CAP_THE_RE = re.compile(r"(?<!^)(?<![.!?]\s)The\b")
 ARTICLE_PRONOUN_RE = re.compile(
     r"\b(the|a)\s+(he|she|they|it)\b", re.IGNORECASE
 )
+# Блокировка служебных токенов
+S_TOKEN_RE = re.compile(r"<s>", re.IGNORECASE)
 
 DUP_WHITELIST = {"go", "no", "yeah"}
 VERB_SET = {
@@ -63,6 +65,9 @@ def _log(pattern: str, match: Iterable[str]) -> None:
 def passes_filters(text: str) -> bool:
     """Return True if ``text`` passes grammar filters."""
 
+    # Блокируем служебные токены
+    if S_TOKEN_RE.search(text):
+        return False
     if ARTICLE_PAIR_RE.search(text):
         return False
     if A_PREP_RE.search(text):

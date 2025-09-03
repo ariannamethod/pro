@@ -189,13 +189,7 @@ class ProEngine:
         exec(compile(code, module_name, "exec"), module.__dict__)
         sys.modules[module_name] = module
 
-        try:
-            import transformers.blocks as tblocks
-
-            block_cls = getattr(module, name)
-            setattr(tblocks, name, block_cls)
-        except Exception:
-            pass
+        # transformers.blocks импорт удален - не используется
 
         return module
 
@@ -299,12 +293,20 @@ class ProEngine:
         await self.scan_datasets()
 
         async def _watch_datasets() -> None:
-            async for _ in awatch('datasets'):
-                try:
-                    await self.scan_datasets()
-                except Exception as exc:  # pragma: no cover - logging side effect
-                    logging.error("Dataset scan failed: %s", exc)
+            # Файловый мониторинг по SHA256 - критически важен!
+            try:
+                from watchfiles import awatch
+                async for _ in awatch('datasets'):
+                    try:
+                        await self.scan_datasets()
+                    except Exception as exc:  # pragma: no cover - logging side effect
+                        logging.error("Dataset scan failed: %s", exc)
+            except ImportError:
+                logging.warning("watchfiles not available, file monitoring disabled")
 
+        # Запускаем файловый мониторинг по SHA256 - критически важен!
+        asyncio.create_task(_watch_datasets())
+        
         # Лишние воркеры отключены - они создавали 20-минутные задержки
         # Оставляем только основную логику обучения после каждого сообщения
 
@@ -1103,12 +1105,8 @@ class ProEngine:
             if isinstance(res, Exception):
                 logging.error("Storing message failed: %s", res)
         context = memory_context + context
-        try:
-            if re.search(r"\b(AND|OR|NOT)\b", message):
-                # Reasoner удален - используем простую логику
-                predicted.append(str(result).lower())
-        except Exception:
-            pass
+        # Reasoner логика удалена - не используется
+        pass
         context_tokens = tokenize(' '.join(context))
         all_words = words + lowercase(context_tokens)
         metrics = await to_thread(
@@ -1200,10 +1198,7 @@ class ProEngine:
             os.makedirs('datasets', exist_ok=True)
             with open(dataset_path, 'a', encoding='utf-8') as fh:
                 fh.write(f"{message}\n{response}\n")
-            # _dataset_tokens удален
-            pass
-            tokens.extend(words)
-            tokens.extend(lowercase(tokenize(response)))
+            # _dataset_tokens удален - не используется
             try:
                 with open(dataset_path, 'rb') as fh:
                     digest = hashlib.sha256(fh.read()).hexdigest()
@@ -1265,17 +1260,18 @@ class ProEngine:
                     # Meta controller удален
         self.log(message, response, metrics)
         # Specialist удален
-        # ИСПРАВЛЕНИЕ ИНВЕРСИИ: применяем к ОТВЕТУ
-        response_words = tokenize(response)
+        # ИСПРАВЛЕНИЕ ИНВЕРСИИ: применяем к ОТВЕТУ с сохранением пунктуации
         inverse_map = {
-            "I": "you", "i": "you",
-            "my": "your", "My": "Your", 
-            "me": "you", "Me": "You",
-            "myself": "yourself",
-            "mine": "yours"
+            "you": "I", "You": "I",
+            "your": "my", "Your": "My", 
+            "yours": "mine", "Yours": "Mine",
+            "yourself": "myself", "Yourself": "Myself"
         }
-        inverted_words = [inverse_map.get(word, word) for word in response_words]
-        response = " ".join(inverted_words)
+        # Используем регексы для замены слов с сохранением пунктуации
+        for original, replacement in inverse_map.items():
+            # Заменяем слова на границах слов
+            pattern = r'\b' + re.escape(original) + r'\b'
+            response = re.sub(pattern, replacement, response)
         
         return response, metrics
 
